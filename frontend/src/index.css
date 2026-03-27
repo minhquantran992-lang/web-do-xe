@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.car2d-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+}
+
+.car2d-base {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.car2d-part {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40%;
+  height: auto;
+  transform: translate(-50%, -50%);
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.car2d-part--exhaust {
+  left: 68%;
+  top: 64%;
+  width: 28%;
+  transform: translate(-50%, -50%) rotate(-6deg);
+}
+
+.car2d-part--seat {
+  left: 54%;
+  top: 44%;
+  width: 30%;
+}
+
+.car2d-part--handlebar {
+  left: 36%;
+  top: 30%;
+  width: 26%;
+  transform: translate(-50%, -50%) rotate(4deg);
+}
+
+.car2d-part--bodykit {
+  left: 50%;
+  top: 52%;
+  width: 58%;
+}
+
+.car2d-part--lighting {
+  left: 24%;
+  top: 38%;
+  width: 20%;
+}
+
+.car2d-part--wheels {
+  left: 50%;
+  top: 72%;
+  width: 56%;
+}
+
