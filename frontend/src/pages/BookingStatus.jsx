@@ -1,12 +1,64 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { updateMe } from '../services/api/auth.js';
-import { createBooking, getMyBooking } from '../services/api/bookings.js';
+import { confirmMyBooking, createBooking, finishMyBooking, getMyBooking, rejectMyBooking } from '../services/api/bookings.js';
 import { apiFetch, apiFetchForm, getApiBaseUrl } from '../services/api/client.js';
 import { listPartneredShops } from '../services/api/vendors.js';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
+
+const toDateInputValue = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const normalizeForBlockedText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
+
+const isInappropriateText = (value) => {
+  const s = normalizeForBlockedText(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const profanity = [
+    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
+    /\b(dcm|dm)\b/i,
+    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
+    /(chó\s*mày|cho\s*may)/i,
+    /(dit|du|lon|cac|cak|buoi)/i
+  ];
+  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  const sensitive = [
+    /\b(porn|xxx|sex|nude)\b/i,
+    /(hiep\s*dam|rape)/i,
+    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
+    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
+    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
+  ];
+  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  return false;
+};
+
+const validateHumanName = (value) => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { ok: false, error: 'Vui lòng nhập họ và tên.' };
+  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'Tên không phù hợp. Vui lòng nhập tên lịch sự.' };
+  return { ok: true, value: raw };
+};
 
 const KYC_COUNTRY_OTHER = '__other__';
 const KYC_COUNTRY_OPTIONS = [
@@ -153,7 +205,7 @@ const BookingStatusInner = () => {
   const [kycOpen, setKycOpen] = useState(false);
   const [kycLastName, setKycLastName] = useState('');
   const [kycFirstName, setKycFirstName] = useState('');
-  const [kycPhone, setKycPhone] = useState('');
+  const [kycDob, setKycDob] = useState('');
   const [kycCity, setKycCity] = useState('');
   const [kycGender, setKycGender] = useState('');
   const [kycCountry, setKycCountry] = useState('');
@@ -162,6 +214,8 @@ const BookingStatusInner = () => {
   const [kycError, setKycError] = useState('');
   const [pendingShopId, setPendingShopId] = useState('');
   const [acceptToastOpen, setAcceptToastOpen] = useState(false);
+  const [quoteDecision, setQuoteDecision] = useState({ busy: false, error: '' });
+  const [handover, setHandover] = useState({ busy: false, error: '' });
   const acceptToastShownRef = useRef(false);
   const lastStatusRef = useRef('');
   const reviewRedirectedRef = useRef(false);
@@ -222,6 +276,7 @@ const BookingStatusInner = () => {
   }, [id, isAuthed, token]);
 
   const status = String(item?.status || '').toLowerCase();
+  const isHandoverAccepted = Boolean(item?.handoverAcceptedAt);
   const shop = item?.shop || null;
   const snapshot = item?.snapshot || null;
   const timeSlotLabel = useMemo(() => {
@@ -256,6 +311,20 @@ const BookingStatusInner = () => {
     }
     lastStatusRef.current = status;
   }, [status]);
+
+  const onFinishHandover = async () => {
+    if (!id) return;
+    if (!token) return;
+    setHandover({ busy: true, error: '' });
+    try {
+      const res = await finishMyBooking({ token, id });
+      setItem(res?.item || null);
+    } catch (e) {
+      setHandover({ busy: false, error: String(e?.message || 'REQUEST_FAILED') });
+      return;
+    }
+    setHandover({ busy: false, error: '' });
+  };
 
   useEffect(() => {
     if (!isAuthed || !token) return;
@@ -371,34 +440,44 @@ const BookingStatusInner = () => {
 
   const needsKyc = useMemo(() => {
     const n = String(user?.name || '').trim();
-    const p = String(user?.phone || '').trim();
+    const nameOk = validateHumanName(n).ok;
+    const dob = toDateInputValue(user?.dob);
     const c = String(user?.city || '').trim();
     const g = String(user?.gender || '').trim();
+    const gOk = ['male', 'female'].includes(String(g || '').toLowerCase());
     const country = String(user?.country || '').trim();
-    return !n || !p || !c || !g || !country;
-  }, [user?.city, user?.country, user?.gender, user?.name, user?.phone]);
+    return !nameOk || !dob || !c || !gOk || !country;
+  }, [user?.city, user?.country, user?.dob, user?.gender, user?.name]);
 
   const saveKyc = async () => {
     if (!token || kycSaving) return;
-    const name = `${String(kycLastName || '').trim()} ${String(kycFirstName || '').trim()}`.trim();
-    const phone = String(kycPhone || '').trim();
+    const lastName = String(kycLastName || '').trim();
+    const firstName = String(kycFirstName || '').trim();
+    const name = `${lastName} ${firstName}`.trim().replace(/\s+/g, ' ');
+    const checkedName = validateHumanName(name);
+    const dob = String(kycDob || '').trim();
     const city = String(kycCity || '').trim();
-    const gender = String(kycGender || '').trim();
+    const gender = String(kycGender || '').trim().toLowerCase();
     const country =
       String(kycCountry || '').trim() === KYC_COUNTRY_OTHER ? String(kycCountryOther || '').trim() : String(kycCountry || '').trim();
-    if (name.length < 2) {
-      setKycError('Vui lòng nhập họ và tên (ít nhất 2 ký tự).');
+    if (!lastName || !firstName) {
+      setKycError('Vui lòng nhập đầy đủ họ và tên.');
       return;
     }
-    if (phone.length < 8 || !/^[0-9+()\s.-]+$/.test(phone)) {
-      setKycError('Vui lòng nhập số điện thoại hợp lệ.');
+    if (!checkedName.ok) {
+      setKycError(checkedName.error);
+      return;
+    }
+    const dobDate = dob ? new Date(`${dob}T00:00:00`) : null;
+    if (!dob || !dobDate || Number.isNaN(dobDate.getTime())) {
+      setKycError('Vui lòng chọn ngày tháng năm sinh.');
       return;
     }
     if (city.length < 2) {
       setKycError('Vui lòng nhập thành phố/tỉnh.');
       return;
     }
-    if (!['male', 'female', 'other'].includes(String(gender || '').toLowerCase())) {
+    if (!['male', 'female'].includes(String(gender || '').toLowerCase())) {
       setKycError('Vui lòng chọn giới tính.');
       return;
     }
@@ -410,7 +489,7 @@ const BookingStatusInner = () => {
     setKycSaving(true);
     setKycError('');
     try {
-      const data = await updateMe({ token, payload: { name, phone, city, gender, country } });
+      const data = await updateMe({ token, payload: { name: checkedName.value, dob, city, gender, country } });
       const nextUser = data?.user || null;
       if (nextUser) setAuth({ token, user: nextUser });
       setKycOpen(false);
@@ -420,7 +499,16 @@ const BookingStatusInner = () => {
         handleBookOtherShop(nextShopId);
       }
     } catch (e) {
-      setKycError(String(e?.message || 'UPDATE_FAILED'));
+      const msg = String(e?.message || 'UPDATE_FAILED');
+      if (msg === 'INVALID_NAME') {
+        setKycError('Tên không hợp lệ.');
+        return;
+      }
+      if (msg === 'NAME_INAPPROPRIATE') {
+        setKycError('Tên không phù hợp. Vui lòng nhập tên lịch sự.');
+        return;
+      }
+      setKycError(msg);
     } finally {
       setKycSaving(false);
     }
@@ -467,9 +555,12 @@ const BookingStatusInner = () => {
       const last = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
       setKycLastName(last);
       setKycFirstName(first);
-      setKycPhone(String(user?.phone || '').trim());
+      setKycDob(toDateInputValue(user?.dob));
       setKycCity(String(user?.city || '').trim());
-      setKycGender(String(user?.gender || '').trim());
+      {
+        const ug = String(user?.gender || '').trim();
+        setKycGender(['male', 'female'].includes(String(ug || '').toLowerCase()) ? ug : '');
+      }
       const uCountry = String(user?.country || '').trim();
       if (uCountry && KYC_COUNTRY_OPTIONS.includes(uCountry)) {
         setKycCountry(uCountry);
@@ -500,7 +591,6 @@ const BookingStatusInner = () => {
         shopId: String(nextShopId),
         timeSlot,
         customerName: String(user?.name || '').trim(),
-        customerPhone: String(user?.phone || '').trim(),
         customerCity: String(user?.city || '').trim(),
         customerGender: String(user?.gender || '').trim(),
         customerCountry: String(user?.country || '').trim()
@@ -513,6 +603,9 @@ const BookingStatusInner = () => {
       nav(`/booking/${encodeURIComponent(nextId)}`, { replace: true });
     } catch (e) {
       const msg = String(e?.message || 'REROUTE_FAILED');
+      if (msg === 'SHOP_NOT_ACCEPTING') {
+        setReroute({ busy: false, error: 'Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.' });
+      } else
       if (msg === 'SHOP_CLOSED_TODAY') {
         setReroute({ busy: false, error: 'Hôm nay shop không làm việc. Vui lòng chọn ngày khác.' });
       } else if (msg === 'SHOP_FULL') {
@@ -521,6 +614,34 @@ const BookingStatusInner = () => {
         setReroute({ busy: false, error: msg });
       }
     }
+  };
+
+  const onConfirmQuote = async () => {
+    if (!token || !id) return;
+    if (quoteDecision.busy) return;
+    setQuoteDecision({ busy: true, error: '' });
+    try {
+      const res = await confirmMyBooking({ token, id });
+      setItem((prev) => (res?.item ? res.item : prev ? { ...prev, status: 'accepted', confirmedAt: new Date().toISOString() } : prev));
+    } catch (e) {
+      setQuoteDecision({ busy: false, error: String(e?.message || 'REQUEST_FAILED') });
+      return;
+    }
+    setQuoteDecision({ busy: false, error: '' });
+  };
+
+  const onRejectQuote = async () => {
+    if (!token || !id) return;
+    if (quoteDecision.busy) return;
+    setQuoteDecision({ busy: true, error: '' });
+    try {
+      const res = await rejectMyBooking({ token, id, reason: '' });
+      setItem((prev) => (res?.item ? res.item : prev ? { ...prev, status: 'cancelled', cancelledAt: new Date().toISOString() } : prev));
+    } catch (e) {
+      setQuoteDecision({ busy: false, error: String(e?.message || 'REQUEST_FAILED') });
+      return;
+    }
+    setQuoteDecision({ busy: false, error: '' });
   };
 
   if (!isAuthed) {
@@ -554,67 +675,111 @@ const BookingStatusInner = () => {
         ? 'green'
         : status === 'in_progress'
           ? 'orange'
-          : status === 'rejected'
-            ? 'red'
-            : status === 'expired'
-              ? 'orange'
-              : 'gray';
+          : status === 'quoted'
+            ? 'orange'
+            : status === 'rejected' || status === 'cancelled'
+              ? 'red'
+              : status === 'expired'
+                ? 'orange'
+                : 'gray';
   const statusLabel =
     status === 'completed'
       ? 'Đã hoàn thành'
       : status === 'in_progress'
-        ? 'Đang thực hiện'
+        ? 'Đang thi công'
         : status === 'accepted'
-          ? 'Đã chấp nhận'
-          : status === 'rejected'
-            ? 'Đã từ chối'
-            : status === 'expired'
-              ? 'Đã hết hạn'
-              : 'Chờ xác nhận';
+          ? 'Đã xác nhận'
+          : status === 'quoted'
+            ? 'Chờ bạn xác nhận'
+            : status === 'rejected'
+              ? 'Shop từ chối'
+              : status === 'cancelled'
+                ? 'Bạn đã từ chối'
+                : status === 'expired'
+                  ? 'Đã hết hạn'
+                  : 'Đang xử lý';
+  const bookingSteps = [
+    { key: 'pending', label: 'Yêu cầu báo giá' },
+    { key: 'quoted', label: 'Báo giá' },
+    { key: 'accepted', label: 'Xác nhận thi công' },
+    { key: 'in_progress', label: 'Đang thi công' },
+    { key: 'completed', label: 'Hoàn tất' }
+  ];
+  const bookingStepIndex =
+    status === 'completed'
+      ? 4
+      : status === 'in_progress'
+        ? 3
+        : status === 'accepted'
+          ? 2
+          : status === 'quoted'
+            ? 1
+            : 0;
+  const bookingTimeline = [
+    { at: item?.createdAt || null, title: 'Đã tạo yêu cầu' },
+    { at: item?.quotedAt || null, title: 'Shop đã báo giá' },
+    { at: item?.confirmedAt || null, title: 'Bạn đã xác nhận thi công' },
+    { at: item?.cancelledAt || null, title: 'Bạn đã từ chối thi công' },
+    { at: item?.respondedAt || null, title: 'Shop đã nhận yêu cầu' },
+    { at: item?.startedAt || null, title: 'Bắt đầu thi công' },
+    { at: item?.completedAt || null, title: 'Hoàn tất' },
+    { at: item?.rejectedAt || null, title: 'Shop từ chối' },
+    { at: item?.expiredAt || null, title: 'Hết hạn' }
+  ]
+    .filter((e) => e.at)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   const headline =
     status === 'completed'
       ? 'Dịch vụ đã hoàn thành'
       : status === 'in_progress'
         ? 'Shop đang thực hiện'
         : status === 'accepted'
-          ? 'Đặt lịch đã được xác nhận'
-          : status === 'pending'
-            ? 'Đang chờ cửa hàng phản hồi'
-            : status === 'rejected'
-              ? 'Cửa hàng đã từ chối'
-              : 'Yêu cầu đã hết hạn';
+          ? 'Bạn đã xác nhận thi công'
+          : status === 'quoted'
+            ? 'Vui lòng xác nhận thi công'
+            : status === 'pending'
+              ? 'Đang chờ cửa hàng phản hồi'
+              : status === 'rejected'
+                ? 'Cửa hàng đã từ chối'
+                : status === 'cancelled'
+                  ? 'Bạn đã từ chối thi công'
+                  : 'Yêu cầu đã hết hạn';
   const subline =
     status === 'completed'
       ? 'Nếu có vấn đề với dịch vụ đã thực hiện, bạn có thể tạo khiếu nại kèm bằng chứng.'
       : status === 'in_progress'
         ? 'Cửa hàng đang thực hiện dịch vụ. Bạn có thể theo dõi trạng thái tại đây.'
         : status === 'accepted'
-          ? 'Cửa hàng sẽ nhanh chóng gọi tới bạn để xác nhận.'
-          : status === 'pending'
-            ? 'Hãy giữ máy. Khi cửa hàng xác nhận, bạn sẽ thấy thông báo thành công.'
-            : status === 'rejected'
-              ? 'Bạn có thể chọn một cửa hàng khác để đặt lịch ngay.'
-              : 'Bạn có thể chọn một cửa hàng khác để đặt lịch lại.';
+          ? 'Shop đã nhận thi công. Bạn sẽ được cập nhật khi shop bắt đầu.'
+          : status === 'quoted'
+            ? 'Shop đã gửi báo giá. Hãy xác nhận hoặc từ chối thi công.'
+            : status === 'pending'
+              ? 'Hãy giữ máy. Khi cửa hàng phản hồi, bạn sẽ thấy cập nhật tại đây.'
+              : status === 'rejected'
+                ? 'Bạn có thể chọn một cửa hàng khác để đặt lịch ngay.'
+                : status === 'cancelled'
+                  ? 'Bạn có thể đặt lịch lại với cửa hàng khác nếu muốn.'
+                  : 'Bạn có thể chọn một cửa hàng khác để đặt lịch lại.';
   const heroBorder =
     status === 'completed' || status === 'accepted'
       ? 'from-emerald-500/25 via-cyan-500/10 to-emerald-500/25'
       : status === 'in_progress'
         ? 'from-amber-500/25 via-orange-500/10 to-amber-500/25'
-      : status === 'pending'
-        ? 'from-sky-500/25 via-cyan-500/10 to-sky-500/25'
-        : status === 'rejected'
-          ? 'from-rose-500/25 via-fuchsia-500/10 to-rose-500/25'
-          : 'from-amber-500/25 via-orange-500/10 to-amber-500/25';
+        : status === 'pending' || status === 'quoted'
+          ? 'from-sky-500/25 via-cyan-500/10 to-sky-500/25'
+          : status === 'rejected' || status === 'cancelled'
+            ? 'from-rose-500/25 via-fuchsia-500/10 to-rose-500/25'
+            : 'from-amber-500/25 via-orange-500/10 to-amber-500/25';
   const heroBadgeCls =
     status === 'completed' || status === 'accepted'
       ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
       : status === 'in_progress'
         ? 'border-amber-400/25 bg-amber-500/10 text-amber-100'
-      : status === 'pending'
-        ? 'border-sky-400/25 bg-sky-500/10 text-sky-100'
-        : status === 'rejected'
-          ? 'border-rose-400/25 bg-rose-500/10 text-rose-100'
-          : 'border-amber-400/25 bg-amber-500/10 text-amber-100';
+        : status === 'pending' || status === 'quoted'
+          ? 'border-sky-400/25 bg-sky-500/10 text-sky-100'
+          : status === 'rejected' || status === 'cancelled'
+            ? 'border-rose-400/25 bg-rose-500/10 text-rose-100'
+            : 'border-amber-400/25 bg-amber-500/10 text-amber-100';
 
   return (
     <div className="relative mx-auto w-full max-w-4xl space-y-5">
@@ -718,8 +883,20 @@ const BookingStatusInner = () => {
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-white/90">{snapshot?.buildName || snapshot?.carName || 'Cấu hình tùy chỉnh'}</div>
               <div className="mt-1 text-xs text-white/55">Mã cấu hình: {String(item?.buildId || '').slice(-10)}</div>
-              <div className="mt-2 text-xs font-semibold text-white/60">Tổng cộng</div>
-              <div className="text-sm font-bold text-white">{formatVnd(snapshot?.totalPrice)}</div>
+              {Number.isFinite(Number(item?.quotedPrice)) ? (
+                <>
+                  <div className="mt-2 text-xs font-semibold text-white/60">Báo giá</div>
+                  <div className="text-sm font-bold text-white">{formatVnd(Number(item.quotedPrice))}</div>
+                  {String(item?.quoteNote || '').trim() ? (
+                    <div className="mt-1 text-xs text-white/55">Ghi chú từ shop: {String(item.quoteNote).trim()}</div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="mt-2 text-xs font-semibold text-white/60">Tổng cộng</div>
+                  <div className="text-sm font-bold text-white">{formatVnd(snapshot?.totalPrice)}</div>
+                </>
+              )}
             </div>
           </div>
 
@@ -743,9 +920,69 @@ const BookingStatusInner = () => {
             <Badge tone={tone}>{statusLabel}</Badge>
           </div>
 
+          <div className="mt-5">
+            <div className="flex items-start justify-between gap-2">
+              {bookingSteps.map((s, idx) => {
+                const done = idx < bookingStepIndex && !shouldAutoReroute;
+                const active = idx === bookingStepIndex && !shouldAutoReroute;
+                return (
+                  <div key={s.key} className="min-w-0 flex-1">
+                    <div className="flex items-center">
+                      <div
+                        className={cx(
+                          'grid h-8 w-8 shrink-0 place-items-center rounded-full border text-xs font-black',
+                          done
+                            ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                            : active
+                              ? 'border-sky-400/30 bg-sky-500/10 text-sky-100'
+                              : 'border-white/10 bg-white/5 text-white/70'
+                        )}
+                      >
+                        {done ? '✓' : idx + 1}
+                      </div>
+                      {idx !== bookingSteps.length - 1 ? (
+                        <div className={cx('mx-2 h-[2px] w-full rounded-full', done ? 'bg-emerald-400/30' : 'bg-white/10')} />
+                      ) : null}
+                    </div>
+                    <div className={cx('mt-2 text-center text-[11px] font-semibold', done ? 'text-white/90' : active ? 'text-sky-100' : 'text-white/55')}>
+                      {s.label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {status === 'pending' ? (
             <div className="mt-3 rounded-2xl border border-sky-400/15 bg-sky-500/10 px-4 py-3 text-sm text-sky-100/90">
               Đang chờ cửa hàng phản hồi. Nếu họ không phản hồi trong vòng 10 phút, yêu cầu sẽ tự động hết hạn.
+            </div>
+          ) : status === 'quoted' ? (
+            <div className="mt-3 rounded-2xl border border-sky-400/15 bg-sky-500/10 px-4 py-3 text-sm text-sky-100/90">
+              Shop đã gửi báo giá. Bạn có muốn xác nhận thi công không?
+              {quoteDecision.error ? (
+                <div className="mt-2 rounded-2xl border border-rose-400/15 bg-rose-500/10 px-3 py-2 text-sm text-rose-100/90">
+                  {quoteDecision.error}
+                </div>
+              ) : null}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={quoteDecision.busy}
+                  onClick={onRejectQuote}
+                  className="inline-flex items-center justify-center rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-2.5 text-sm font-black text-rose-100 hover:bg-rose-500/15 disabled:opacity-60"
+                >
+                  Từ chối
+                </button>
+                <button
+                  type="button"
+                  disabled={quoteDecision.busy}
+                  onClick={onConfirmQuote}
+                  className="inline-flex items-center justify-center rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-black text-zinc-950 hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  Xác nhận
+                </button>
+              </div>
             </div>
           ) : status === 'in_progress' ? (
             <div className="mt-3 rounded-2xl border border-amber-400/15 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
@@ -757,8 +994,11 @@ const BookingStatusInner = () => {
             </div>
           ) : status === 'accepted' ? (
             <div className="mt-3 rounded-2xl border border-emerald-400/15 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100/90">
-              Đặt lịch đã được xác nhận thành công. Cửa hàng sẽ nhanh chóng gọi tới bạn để xác nhận.
-              <div className="mt-2 text-xs text-emerald-100/80">Mẹo: hãy để ý cuộc gọi lạ trong ít phút tới.</div>
+              Bạn đã xác nhận thi công. Shop sẽ bắt đầu chuyển sang mục thi công khi sẵn sàng.
+            </div>
+          ) : status === 'cancelled' ? (
+            <div className="mt-3 rounded-2xl border border-rose-400/15 bg-rose-500/10 px-4 py-3 text-sm text-rose-100/90">
+              Bạn đã từ chối thi công. Bạn có thể đặt lịch lại với cửa hàng khác nếu muốn.
             </div>
           ) : status === 'rejected' ? (
             <div className="mt-2 space-y-3 text-sm text-white/75">
@@ -782,9 +1022,43 @@ const BookingStatusInner = () => {
             </div>
           )}
 
+          {bookingTimeline.length ? (
+            <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="text-xs font-semibold text-white/70">Tiến trình</div>
+              <ol className="relative mt-3 ml-2 border-l border-white/10 pl-5">
+                {bookingTimeline.map((e) => (
+                  <li key={`${e.title}:${String(e.at)}`} className="relative pb-5">
+                    <div className="absolute -left-[23px] top-0.5 h-3 w-3 rounded-full border border-white/10 bg-zinc-950" />
+                    <div className="text-sm font-semibold text-white/85">{e.title}</div>
+                    <div className="mt-1 text-xs text-white/55">{new Date(e.at).toLocaleString('vi-VN')}</div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="text-xs font-semibold text-white/70">Khiếu nại</div>
-            <div className="mt-1 text-xs text-white/55">Chỉ gửi khiếu nại sau khi dịch vụ hoàn thành.</div>
+            <div className="mt-1 text-xs text-white/55">
+              Chỉ gửi khiếu nại sau khi dịch vụ hoàn thành. Sau khi bạn bấm Hoàn tất, bạn sẽ không thể gửi khiếu nại mới.
+            </div>
+            {status === 'completed' ? (
+              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-white/70">Bàn giao</div>
+                  {isHandoverAccepted ? <Badge tone="green">Đã hoàn tất</Badge> : <Badge tone="gray">Chưa hoàn tất</Badge>}
+                </div>
+                {handover.error ? <div className="mt-2 text-xs text-rose-200">{handover.error}</div> : null}
+                <button
+                  type="button"
+                  onClick={onFinishHandover}
+                  disabled={handover.busy || isHandoverAccepted}
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-black text-zinc-950 hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  Hoàn tất
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => {
@@ -793,6 +1067,7 @@ const BookingStatusInner = () => {
               }}
               disabled={
                 status !== 'completed' ||
+                isHandoverAccepted ||
                 Boolean(tickets.items?.some((t) => ['PENDING', 'DISPUTED', 'UNDER_REVIEW'].includes(String(t?.status || '').toUpperCase())))
               }
               className="mt-3 inline-flex w-full items-center justify-center rounded-2xl bg-sky-400 px-4 py-2.5 text-sm font-black text-zinc-950 hover:bg-sky-300 disabled:opacity-60"
@@ -1148,23 +1423,12 @@ const BookingStatusInner = () => {
                 </div>
               </div>
               <label className="block">
-                <div className="text-sm font-medium text-zinc-200">Số điện thoại</div>
+                <div className="text-sm font-medium text-zinc-200">Ngày tháng năm sinh</div>
                 <input
-                  value={kycPhone}
-                  onChange={(e) => setKycPhone(e.target.value)}
+                  type="date"
+                  value={kycDob}
+                  onChange={(e) => setKycDob(e.target.value)}
                   className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
-                  placeholder="VD: 0901234567"
-                  disabled={kycSaving}
-                  inputMode="tel"
-                />
-              </label>
-              <label className="block">
-                <div className="text-sm font-medium text-zinc-200">Thành phố / Tỉnh</div>
-                <input
-                  value={kycCity}
-                  onChange={(e) => setKycCity(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
-                  placeholder="VD: TP.HCM"
                   disabled={kycSaving}
                 />
               </label>
@@ -1179,8 +1443,17 @@ const BookingStatusInner = () => {
                   <option value="">Chọn giới tính</option>
                   <option value="male">Nam</option>
                   <option value="female">Nữ</option>
-                  <option value="other">Khác</option>
                 </select>
+              </label>
+              <label className="block">
+                <div className="text-sm font-medium text-zinc-200">Thành phố / Tỉnh</div>
+                <input
+                  value={kycCity}
+                  onChange={(e) => setKycCity(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
+                  placeholder="VD: TP.HCM"
+                  disabled={kycSaving}
+                />
               </label>
               <label className="block">
                 <div className="text-sm font-medium text-zinc-200">Quốc gia</div>
@@ -1227,7 +1500,7 @@ const BookingStatusInner = () => {
                   disabled={kycSaving}
                   className="rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-zinc-950 shadow-[0_10px_30px_rgba(14,165,233,0.20)] transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-300 disabled:shadow-none"
                 >
-                  {kycSaving ? 'Đang lưu…' : 'Lưu & đặt lịch'}
+                  {kycSaving ? 'Đang lưu…' : 'Lưu'}
                 </button>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { acceptVendorBooking, listVendorBookings, rejectVendorBooking, rescheduleVendorBooking, updateVendorBookingStatus } from '../../services/api/bookings.js';
 import { getCars } from '../../services/api/cars.js';
 import { useAuth } from '../../services/auth/AuthContext.jsx';
@@ -63,7 +63,7 @@ const Badge = ({ tone, children }) => {
   return <span className={cx('inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold', cls)}>{children}</span>;
 };
 
-const BookingModelPreview = ({ modelUrl, color }) => {
+const BookingModelPreview = memo(({ modelUrl, color }) => {
   const holderRef = useRef(null);
   const [active, setActive] = useState(false);
 
@@ -109,7 +109,7 @@ const BookingModelPreview = ({ modelUrl, color }) => {
       )}
     </div>
   );
-};
+});
 
 const Requests = () => {
   const { token } = useAuth();
@@ -121,6 +121,7 @@ const Requests = () => {
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(Date.now());
   const [viewStatus, setViewStatus] = useState('pending');
+  const [quoteDraft, setQuoteDraft] = useState({});
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectId, setRejectId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -128,6 +129,7 @@ const Requests = () => {
   const [rescheduleMode, setRescheduleMode] = useState('accept');
   const [rescheduleId, setRescheduleId] = useState('');
   const [rescheduleValue, setRescheduleValue] = useState('');
+  const [rescheduleSuggestedQuote, setRescheduleSuggestedQuote] = useState(null);
   const [rescheduleError, setRescheduleError] = useState('');
   const [toast, setToast] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
@@ -163,17 +165,34 @@ const Requests = () => {
   }, [cars]);
 
   useEffect(() => {
-    const tick = window.setInterval(() => setNow(Date.now()), 250);
+    if (viewStatus !== 'pending') return;
+    setNow(Date.now());
+    const tick = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(tick);
-  }, []);
+  }, [viewStatus]);
 
   useEffect(() => {
     if (!token) return;
     let alive = true;
 
-    const load = async () => {
+    const load = async ({ silent } = {}) => {
+      if (!silent) setLoading(true);
       try {
-        const res = await listVendorBookings({ token, status: viewStatus });
+        const res =
+          viewStatus === 'closed'
+            ? await Promise.all([
+                listVendorBookings({ token, status: 'rejected' }),
+                listVendorBookings({ token, status: 'expired' }),
+                listVendorBookings({ token, status: 'cancelled' })
+              ]).then((arr) => {
+                const a = Array.isArray(arr?.[0]?.items) ? arr[0].items : [];
+                const b = Array.isArray(arr?.[1]?.items) ? arr[1].items : [];
+                const c = Array.isArray(arr?.[2]?.items) ? arr[2].items : [];
+                const map = new Map();
+                for (const it of [...a, ...b, ...c]) map.set(String(it?._id || ''), it);
+                return { items: Array.from(map.values()) };
+              })
+            : await listVendorBookings({ token, status: viewStatus });
         if (!alive) return;
         const next = Array.isArray(res?.items) ? res.items : [];
         setItems(next);
@@ -192,12 +211,15 @@ const Requests = () => {
         setError(e?.message || 'REQUEST_FAILED');
       } finally {
         if (!alive) return;
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     };
 
-    load();
-    const poll = window.setInterval(load, 3000);
+    load({ silent: false });
+    const poll = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      load({ silent: true });
+    }, 8000);
     return () => {
       alive = false;
       window.clearInterval(poll);
@@ -210,12 +232,34 @@ const Requests = () => {
     return arr;
   }, [items]);
 
-  const onAccept = async (id) => {
+  const statusLabel = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    if (s === 'pending') return t('seller_status_pending');
+    if (s === 'quoted') return t('seller_status_quoted');
+    if (s === 'accepted') return t('seller_status_accepted');
+    if (s === 'in_progress') return t('seller_status_in_progress');
+    if (s === 'completed') return t('seller_status_completed');
+    if (s === 'rejected') return t('seller_status_rejected');
+    if (s === 'cancelled') return t('seller_status_cancelled');
+    if (s === 'expired') return t('seller_status_expired');
+    return String(status || '');
+  };
+
+  const digitsOnly = (s) => String(s || '').replace(/[^\d]/g, '');
+  const parseMoney = (s) => {
+    const d = digitsOnly(s);
+    if (!d) return null;
+    const n = Number(d);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  };
+
+  const onAccept = async (id, { quotedPrice, quoteNote } = {}) => {
     const bid = String(id || '').trim();
     if (!bid || busyId) return;
     setBusyId(bid);
     try {
-      await acceptVendorBooking({ token, id: bid });
+      await acceptVendorBooking({ token, id: bid, quotedPrice, quoteNote });
       setToast(t('seller_toast_request_accepted'));
       window.setTimeout(() => setToast(''), 4000);
       setItems((prev) => (Array.isArray(prev) ? prev.filter((x) => String(x?._id || '') !== bid) : []));
@@ -241,6 +285,7 @@ const Requests = () => {
     setRescheduleMode(mode === 'reschedule' ? 'reschedule' : 'accept');
     setRescheduleId(id);
     setRescheduleValue(toDatetimeLocal(booking?.timeSlot));
+    setRescheduleSuggestedQuote(booking?.quotedPrice ?? booking?.snapshot?.estimatedPrice ?? booking?.snapshot?.totalPrice ?? null);
     setRescheduleError('');
     setRescheduleOpen(true);
   };
@@ -275,7 +320,14 @@ const Requests = () => {
         );
         setToast('Đã dời lịch thi công.');
       } else {
-        await acceptVendorBooking({ token, id, timeSlot: iso });
+        const fromInput = parseMoney(quoteDraft?.[id]?.price ?? '');
+        const fallback = Number.isFinite(Number(rescheduleSuggestedQuote)) ? Math.round(Number(rescheduleSuggestedQuote)) : null;
+        const q = fromInput ?? fallback;
+        if (q === null) {
+          setRescheduleError(t('seller_requests_quote_required'));
+          return;
+        }
+        await acceptVendorBooking({ token, id, timeSlot: iso, quotedPrice: q });
         setItems((prev) => (Array.isArray(prev) ? prev.filter((x) => String(x?._id || '') !== id) : []));
         setToast('Đã nhận và dời lịch.');
       }
@@ -283,6 +335,7 @@ const Requests = () => {
       setRescheduleOpen(false);
       setRescheduleId('');
       setRescheduleValue('');
+      setRescheduleSuggestedQuote(null);
     } catch (e) {
       const msg = String(e?.message || e?.data?.error || 'REQUEST_FAILED');
       if (msg === 'TIME_IN_PAST') setRescheduleError('Vui lòng chọn thời gian từ hiện tại trở đi.');
@@ -359,9 +412,11 @@ const Requests = () => {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Segment k="pending" label={t('seller_status_pending')} />
+            <Segment k="quoted" label={t('seller_status_quoted')} />
             <Segment k="accepted" label={t('seller_status_accepted')} />
             <Segment k="in_progress" label={t('seller_status_in_progress')} />
             <Segment k="completed" label={t('seller_status_completed')} />
+            <Segment k="closed" label={t('seller_status_closed')} />
           </div>
         </div>
       </div>
@@ -381,6 +436,7 @@ const Requests = () => {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {sorted.map((b) => {
+          const bid = String(b?._id || '').trim();
           const expiresAt = parseIso(b?.expiresAt);
           const remaining = expiresAt ? expiresAt.getTime() - now : 0;
           const snapshot = b?.snapshot || {};
@@ -388,7 +444,7 @@ const Requests = () => {
           const legal = String(snapshot?.legalStatus || '').toLowerCase();
           const legalTone = legal === 'ok' ? 'green' : legal === 'illegal' ? 'red' : legal ? 'orange' : 'gray';
           const timeSlotLabel = b?.timeSlot ? new Date(b.timeSlot).toLocaleString(locale) : '';
-          const isBusy = busyId === String(b?._id || '');
+          const isBusy = busyId === bid;
           const isExpired = viewStatus === 'pending' && remaining <= 0;
           const urgent = viewStatus === 'pending' && remaining > 0 && remaining <= 2 * 60 * 1000;
           const parts = Array.isArray(snapshot?.parts) ? snapshot.parts : [];
@@ -405,10 +461,13 @@ const Requests = () => {
           );
           const chatRaw = b?.user?._id || b?.userId?._id || b?.userId || '';
           const chatUid = String(chatRaw || '').trim();
+          const suggestedQuote = b?.quotedPrice ?? snapshot?.estimatedPrice ?? snapshot?.totalPrice;
+          const hasDraft = Object.prototype.hasOwnProperty.call(quoteDraft || {}, bid);
+          const quotePriceInput = hasDraft ? String(quoteDraft?.[bid]?.price ?? '') : Number.isFinite(Number(suggestedQuote)) ? String(Math.round(Number(suggestedQuote))) : '';
 
           return (
             <div
-              key={String(b?._id || '')}
+              key={bid}
               className={cx(
                 'overflow-hidden rounded-3xl border bg-zinc-950/50 backdrop-blur-xl',
                 urgent ? 'border-amber-400/35 shadow-[0_0_0_1px_rgba(251,191,36,0.12)]' : 'border-zinc-800/70'
@@ -502,8 +561,15 @@ const Requests = () => {
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-xs font-semibold text-zinc-500">
-                    {t('seller_requests_status_prefix')}: {String(b?.status || viewStatus)}
+                    {t('seller_requests_status_prefix')}: {statusLabel(b?.status || viewStatus)}
                   </div>
+                  {String(b?.status || '') === 'rejected' && String(b?.rejectedReason || '').trim() ? (
+                    <div className="text-xs font-semibold text-rose-200">{String(b.rejectedReason).trim()}</div>
+                  ) : String(b?.status || '') === 'cancelled' && String(b?.cancelReason || '').trim() ? (
+                    <div className="text-xs font-semibold text-rose-200">{String(b.cancelReason).trim()}</div>
+                  ) : String(b?.status || '') === 'expired' ? (
+                    <div className="text-xs font-semibold text-zinc-400">Hết hạn</div>
+                  ) : null}
                   <div className="flex items-center gap-2">
                     {viewStatus === 'pending' ? (
                       <>
@@ -527,13 +593,38 @@ const Requests = () => {
                         >
                           {t('seller_requests_reject')}
                         </button>
+                        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-zinc-400">{t('seller_requests_quote_label')}</div>
+                          <input
+                            value={quotePriceInput}
+                            disabled={isBusy || isExpired}
+                            onChange={(e) => {
+                              const v = digitsOnly(e.target.value).slice(0, 14);
+                              setQuoteDraft((prev) => ({ ...(prev || {}), [bid]: { ...(prev?.[bid] || {}), price: v } }));
+                            }}
+                            placeholder={t('seller_requests_quote_placeholder')}
+                            inputMode="numeric"
+                            className="w-28 bg-transparent text-sm font-bold text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+                          />
+                          <div className="text-[11px] font-semibold text-zinc-500">₫</div>
+                        </div>
                         <button
                           type="button"
                           disabled={isBusy || isExpired}
-                          onClick={() => onAccept(b._id)}
+                          onClick={() => {
+                            const fromInput = parseMoney(quotePriceInput);
+                            const fallback = Number.isFinite(Number(suggestedQuote)) ? Math.round(Number(suggestedQuote)) : null;
+                            const q = fromInput ?? fallback;
+                            if (q === null) {
+                              setToast(t('seller_requests_quote_required'));
+                              window.setTimeout(() => setToast(''), 2500);
+                              return;
+                            }
+                            onAccept(bid, { quotedPrice: q });
+                          }}
                           className="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-bold text-zinc-950 hover:bg-emerald-300 disabled:opacity-60"
                         >
-                          {t('seller_requests_accept')}
+                          {t('seller_requests_quote_action')}
                         </button>
                       </>
                     ) : viewStatus === 'accepted' ? (
@@ -672,6 +763,7 @@ const Requests = () => {
               setRescheduleOpen(false);
               setRescheduleId('');
               setRescheduleValue('');
+              setRescheduleSuggestedQuote(null);
               setRescheduleError('');
             }}
             aria-label={t('seller_common_close')}
@@ -700,6 +792,34 @@ const Requests = () => {
                   disabled={Boolean(busyId)}
                 />
               </label>
+              {rescheduleMode !== 'reschedule' ? (
+                <div className="mt-4">
+                  <label className="space-y-2">
+                    <div className="text-xs font-semibold text-zinc-300">{t('seller_requests_quote_label')}</div>
+                    <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                      <input
+                        value={
+                          Object.prototype.hasOwnProperty.call(quoteDraft || {}, String(rescheduleId || ''))
+                            ? String(quoteDraft?.[String(rescheduleId || '')]?.price ?? '')
+                            : Number.isFinite(Number(rescheduleSuggestedQuote))
+                              ? String(Math.round(Number(rescheduleSuggestedQuote)))
+                              : ''
+                        }
+                        disabled={Boolean(busyId)}
+                        onChange={(e) => {
+                          const id = String(rescheduleId || '');
+                          const v = digitsOnly(e.target.value).slice(0, 14);
+                          setQuoteDraft((prev) => ({ ...(prev || {}), [id]: { ...(prev?.[id] || {}), price: v } }));
+                        }}
+                        placeholder={t('seller_requests_quote_placeholder')}
+                        inputMode="numeric"
+                        className="w-full bg-transparent text-sm font-bold text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+                      />
+                      <div className="text-[11px] font-semibold text-zinc-500">₫</div>
+                    </div>
+                  </label>
+                </div>
+              ) : null}
               <div className="mt-4 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -708,6 +828,7 @@ const Requests = () => {
                     setRescheduleOpen(false);
                     setRescheduleId('');
                     setRescheduleValue('');
+                    setRescheduleSuggestedQuote(null);
                     setRescheduleError('');
                   }}
                   disabled={Boolean(busyId)}

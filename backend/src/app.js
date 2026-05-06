@@ -38,6 +38,10 @@ const ticketsRoutes = require('./routes/ticketsRoutes');
 const adminTicketsRoutes = require('./routes/adminTicketsRoutes');
 const vendorTicketsRoutes = require('./routes/vendorTicketsRoutes');
 const adminFinanceRoutes = require('./routes/adminFinanceRoutes');
+const followRoutes = require('./routes/followRoutes');
+const notificationsRoutes = require('./routes/notificationsRoutes');
+const ordersRoutes = require('./routes/ordersRoutes');
+const vendorOrdersRoutes = require('./routes/vendorOrdersRoutes');
 
 const createServer = () => {
   const app = express();
@@ -77,11 +81,15 @@ const createServer = () => {
   app.use('/api/vendor/cars', vendorCarsRoutes);
   app.use('/api/vendor/chat', vendorChatRoutes);
   app.use('/api/vendor/tickets', vendorTicketsRoutes);
+  app.use('/api/vendor/orders', vendorOrdersRoutes);
   app.use('/api/public-cars', publicCarsRoutes);
   app.use('/vendors', vendorsRoutes);
   app.use('/api/vendors', vendorsRoutes);
   app.use('/api/bookings', bookingsRoutes);
   app.use('/api/tickets', ticketsRoutes);
+  app.use('/api/follow', followRoutes);
+  app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/orders', ordersRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/search', searchRoutes);

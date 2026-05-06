@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Landing from './pages/Landing.jsx';
 import Bikes from './pages/Bikes.jsx';
@@ -30,11 +30,83 @@ import Advisor from './pages/Advisor.jsx';
 import Profile from './pages/Profile.jsx';
 import SearchResults from './pages/SearchResults.jsx';
 import Shop from './pages/Shop.jsx';
+import Following from './pages/Following.jsx';
+import Notifications from './pages/Notifications.jsx';
+import Orders from './pages/Orders.jsx';
+import OrderDetail from './pages/OrderDetail.jsx';
 import SellerCenter from './pages/seller/SellerCenter.jsx';
 import DashboardLayout from './layouts/DashboardLayout.jsx';
 import { useAuth } from './services/auth/AuthContext.jsx';
 import { LanguageProvider } from './services/i18n.jsx';
 import AiAssistant from './components/AiAssistant.jsx';
+
+const FullscreenError = ({ title, message, detail, onRetry }) => {
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <div className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
+        <div className="w-full overflow-hidden rounded-3xl border border-white/10 bg-black/30 shadow-2xl shadow-black/60 backdrop-blur-2xl">
+          <div className="border-b border-white/10 px-6 py-5">
+            <div className="text-xs font-semibold tracking-[0.22em] text-rose-300/90">CARBANANA</div>
+            <div className="mt-2 text-2xl font-black tracking-tight text-zinc-50">{title}</div>
+            <div className="mt-1 text-sm text-zinc-300">{message}</div>
+          </div>
+          <div className="space-y-4 px-6 py-5">
+            {detail ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-zinc-200">
+                <div className="font-semibold text-zinc-200">Chi tiết</div>
+                <div className="mt-1 whitespace-pre-wrap break-words text-zinc-300">{detail}</div>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-white/10"
+              >
+                Tải lại trang
+              </button>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-black text-zinc-950 hover:bg-emerald-300"
+              >
+                Thử lại
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    const err = this.state?.error;
+    if (err) {
+      const msg = String(err?.message || '').trim() || 'Ứng dụng gặp lỗi không mong muốn.';
+      const stack = String(err?.stack || '').trim();
+      return (
+        <FullscreenError
+          title="Ứng dụng gặp lỗi"
+          message="Vui lòng tải lại trang. Nếu vẫn gặp, hãy thử lại sau ít phút."
+          detail={[msg, stack].filter(Boolean).join('\n\n')}
+          onRetry={() => window.location.reload()}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const Page = ({ children }) => {
   return (
@@ -77,6 +149,8 @@ const App = () => {
   const { isAuthed, user } = useAuth();
   const isConfigurator = location.pathname.startsWith('/configurator') || location.pathname.startsWith('/customize');
   const role = String(user?.role || '').trim().toUpperCase();
+  const [fatal, setFatal] = useState(null);
+  const lastFatalRef = useRef({ key: '', at: 0 });
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -92,6 +166,104 @@ const App = () => {
     } catch {}
     navigate('/seller-center', { replace: true });
   }, [isAuthed, navigate, role, user?.isAdmin]);
+
+  useEffect(() => {
+    const setFatalSafe = (next) => {
+      const key = String(next?.kind || '') + '|' + String(next?.status || '') + '|' + String(next?.path || '') + '|' + String(next?.message || '');
+      const now = Date.now();
+      if (key && lastFatalRef.current.key === key && now - lastFatalRef.current.at < 2500) return;
+      lastFatalRef.current = { key, at: now };
+      setFatal(next);
+    };
+
+    const onApiError = (ev) => {
+      const d = ev?.detail && typeof ev.detail === 'object' ? ev.detail : {};
+      const kind = String(d?.kind || '').trim();
+      const status = Number(d?.status) || 0;
+      if (!kind) return;
+      setFatalSafe({
+        kind,
+        status,
+        path: String(d?.path || ''),
+        base: String(d?.base || ''),
+        message: String(d?.message || '')
+      });
+    };
+
+    const onOffline = () => setFatalSafe({ kind: 'offline', status: 0, path: '', base: '', message: '' });
+    const onUnhandled = (ev) => {
+      const reason = ev?.reason;
+      const msg = String(reason?.message || reason || '').trim();
+      if (!msg) return;
+      setFatalSafe({ kind: 'runtime', status: 0, path: '', base: '', message: msg });
+    };
+    const onError = (ev) => {
+      const msg = String(ev?.message || '').trim();
+      if (!msg) return;
+      setFatalSafe({ kind: 'runtime', status: 0, path: '', base: '', message: msg });
+    };
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) onOffline();
+    } catch {}
+
+    window.addEventListener('carbanana:api-error', onApiError);
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('unhandledrejection', onUnhandled);
+    window.addEventListener('error', onError);
+    return () => {
+      window.removeEventListener('carbanana:api-error', onApiError);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('unhandledrejection', onUnhandled);
+      window.removeEventListener('error', onError);
+    };
+  }, []);
+
+  if (fatal) {
+    const kind = String(fatal?.kind || '').trim();
+    const status = Number(fatal?.status) || 0;
+    const path = String(fatal?.path || '').trim();
+    const base = String(fatal?.base || '').trim();
+    const msg = String(fatal?.message || '').trim();
+    const title =
+      kind === 'offline'
+        ? 'Mất kết nối mạng'
+        : kind === 'network'
+          ? 'Không thể kết nối máy chủ'
+          : kind === 'server'
+            ? 'Máy chủ đang gặp sự cố'
+            : 'Đã xảy ra lỗi';
+    const message =
+      kind === 'offline'
+        ? 'Thiết bị của bạn đang offline. Vui lòng kiểm tra mạng rồi thử lại.'
+        : kind === 'network'
+          ? 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.'
+          : kind === 'server'
+            ? 'Hệ thống đang lỗi hoặc quá tải. Vui lòng thử lại sau.'
+            : 'Ứng dụng gặp lỗi không mong muốn. Vui lòng thử lại.';
+    const detail = [
+      msg ? `Mã lỗi: ${msg}` : '',
+      status ? `HTTP: ${status}` : '',
+      path ? `API: ${path}` : '',
+      base ? `Server: ${base}` : ''
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return (
+      <FullscreenError
+        title={title}
+        message={message}
+        detail={detail}
+        onRetry={() => {
+          try {
+            localStorage.removeItem('carbanana.apiBase');
+          } catch {}
+          setFatal(null);
+          window.location.reload();
+        }}
+      />
+    );
+  }
 
   return (
     <div className={isConfigurator ? 'min-h-screen bg-zinc-950 text-zinc-100' : 'min-h-screen bg-zinc-950 text-zinc-100'}>
@@ -251,10 +423,42 @@ const App = () => {
               }
             />
             <Route
+              path="/orders"
+              element={
+                <Page>
+                  <Orders />
+                </Page>
+              }
+            />
+            <Route
+              path="/orders/:id"
+              element={
+                <Page>
+                  <OrderDetail />
+                </Page>
+              }
+            />
+            <Route
               path="/profile"
               element={
                 <Page>
                   <Profile />
+                </Page>
+              }
+            />
+            <Route
+              path="/following"
+              element={
+                <Page>
+                  <Following />
+                </Page>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <Page>
+                  <Notifications />
                 </Page>
               }
             />
@@ -347,7 +551,9 @@ const App = () => {
 const AppWithProviders = () => {
   return (
     <LanguageProvider>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </LanguageProvider>
   );
 };

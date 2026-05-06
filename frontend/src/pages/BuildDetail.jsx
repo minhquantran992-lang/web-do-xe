@@ -10,6 +10,7 @@ import { useAuth } from '../services/auth/AuthContext.jsx';
 import { useI18n } from '../services/i18n.jsx';
 import { getApiBaseUrl } from '../services/api/client.js';
 import ChatThreadModal from '../components/ChatThreadModal.jsx';
+import FollowButton from '../components/FollowButton.jsx';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -45,6 +46,58 @@ const formatVnd = (value) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
   return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(n)} ₫`;
+};
+
+const toDateInputValue = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const normalizeForBlockedText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
+
+const isInappropriateText = (value) => {
+  const s = normalizeForBlockedText(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const profanity = [
+    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
+    /\b(dcm|dm)\b/i,
+    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
+    /(chó\s*mày|cho\s*may)/i,
+    /(dit|du|lon|cac|cak|buoi)/i
+  ];
+  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  const sensitive = [
+    /\b(porn|xxx|sex|nude)\b/i,
+    /(hiep\s*dam|rape)/i,
+    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
+    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
+    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
+  ];
+  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  return false;
+};
+
+const validateHumanName = (value) => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { ok: false, error: 'Vui lòng nhập họ và tên.' };
+  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'Tên không phù hợp. Vui lòng nhập tên lịch sự.' };
+  return { ok: true, value: raw };
 };
 
 const pickMountCandidates = (mount) => {
@@ -145,7 +198,7 @@ const BuildDetail = () => {
   const [kycMode, setKycMode] = useState('full');
   const [kycLastName, setKycLastName] = useState('');
   const [kycFirstName, setKycFirstName] = useState('');
-  const [kycPhone, setKycPhone] = useState('');
+  const [kycDob, setKycDob] = useState('');
   const [kycCity, setKycCity] = useState('');
   const [kycGender, setKycGender] = useState('');
   const [kycCountry, setKycCountry] = useState('');
@@ -165,7 +218,7 @@ const BuildDetail = () => {
   useEffect(() => {
     setKycLastName('');
     setKycFirstName('');
-    setKycPhone('');
+    setKycDob('');
     setKycCity('');
     setKycGender('');
     setKycCountry('');
@@ -234,12 +287,13 @@ const BuildDetail = () => {
 
   const needsKyc = useMemo(() => {
     const n = String(user?.name || '').trim();
-    const p = String(user?.phone || '').trim();
+    const nameOk = validateHumanName(n).ok;
+    const dob = toDateInputValue(user?.dob);
     const c = String(user?.city || '').trim();
-    const g = String(user?.gender || '').trim();
+    const g = String(user?.gender || '').trim().toLowerCase();
     const country = String(user?.country || '').trim();
-    return !n || !p || !c || !g || !country;
-  }, [user?.city, user?.country, user?.gender, user?.name, user?.phone]);
+    return !nameOk || !dob || !c || !['male', 'female'].includes(g) || !country;
+  }, [user?.city, user?.country, user?.dob, user?.gender, user?.name]);
 
   const todayIso = useMemo(() => {
     const d = new Date();
@@ -406,15 +460,15 @@ const BuildDetail = () => {
 
     const savedLast = String(saved?.lastName || '').trim();
     const savedFirst = String(saved?.firstName || '').trim();
-    const savedPhone = String(saved?.phone || '').trim();
+    const savedDob = String(saved?.dob || '').trim();
     const savedCity = String(saved?.city || '').trim();
     const savedGender = String(saved?.gender || '').trim();
     const savedCountry = String(saved?.country || '').trim();
 
-    if (savedLast || savedFirst || savedPhone || savedCity) {
+    if (savedLast || savedFirst || savedDob || savedCity) {
       setKycLastName(savedLast);
       setKycFirstName(savedFirst);
-      setKycPhone(savedPhone);
+      setKycDob(savedDob);
       setKycCity(savedCity);
       setKycGender(savedGender);
       if (savedCountry && KYC_COUNTRY_OPTIONS.includes(savedCountry)) {
@@ -434,7 +488,7 @@ const BuildDetail = () => {
       const last = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
       setKycLastName(last);
       setKycFirstName(first);
-      setKycPhone(String(user?.phone || '').trim());
+      setKycDob(toDateInputValue(user?.dob));
       setKycCity(String(user?.city || '').trim());
       setKycGender(String(user?.gender || '').trim());
       const uCountry = String(user?.country || '').trim();
@@ -496,7 +550,7 @@ const BuildDetail = () => {
     }
     const picked = shops.find((x) => String(x?._id || '') === String(selectedShopId || ''));
     if (picked && picked?.acceptingBookings === false) {
-      setToast('Shop đang tạm dừng nhận khách. Vui lòng chọn shop khác.');
+      setToast('Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.');
       return;
     }
     if (picked?.closedToday) {
@@ -519,11 +573,97 @@ const BuildDetail = () => {
 
   const visibleShops = useMemo(() => {
     const list = Array.isArray(shops) ? shops : [];
-    return list.filter((s) => s?.acceptingBookings !== false);
+    return list;
   }, [shops]);
 
-  const saveKycAndBook = async () => {
+  const onKycPrimaryAction = async () => {
     if (!token || kycSaving) return;
+    const mode = String(kycMode || 'full');
+    if (mode !== 'dateOnly') {
+      const lastName = String(kycLastName || '').trim();
+      const firstName = String(kycFirstName || '').trim();
+      const rawName = `${lastName} ${firstName}`.trim().replace(/\s+/g, ' ');
+      const city = String(kycCity || '').trim();
+      const gender = String(kycGender || '').trim().toLowerCase();
+      const country = String(kycCountry || '').trim() === KYC_COUNTRY_OTHER ? String(kycCountryOther || '').trim() : String(kycCountry || '').trim();
+      const dob = String(kycDob || '').trim();
+
+      if (!lastName || !firstName) {
+        setKycError('Vui lòng nhập đầy đủ họ và tên.');
+        return;
+      }
+      const checkedName = validateHumanName(rawName);
+      if (!checkedName.ok) {
+        setKycError(checkedName.error);
+        return;
+      }
+      const dobDate = dob ? new Date(`${dob}T00:00:00`) : null;
+      if (!dob || !dobDate || Number.isNaN(dobDate.getTime())) {
+        setKycError('Vui lòng chọn ngày tháng năm sinh.');
+        return;
+      }
+      if (dobDate.getTime() >= new Date(`${todayIso}T00:00:00`).getTime()) {
+        setKycError('Ngày sinh không hợp lệ.');
+        return;
+      }
+      if (!['male', 'female'].includes(gender)) {
+        setKycError('Vui lòng chọn giới tính.');
+        return;
+      }
+      if (city.length < 2) {
+        setKycError('Vui lòng nhập thành phố/tỉnh.');
+        return;
+      }
+      if (country.length < 2) {
+        setKycError('Vui lòng chọn quốc gia.');
+        return;
+      }
+
+      setKycSaving(true);
+      setKycError('');
+      try {
+        try {
+          if (kycStorageKey) {
+            localStorage.setItem(
+              kycStorageKey,
+              JSON.stringify({
+                lastName: String(kycLastName || '').trim(),
+                firstName: String(kycFirstName || '').trim(),
+                dob,
+                city,
+                gender,
+                country
+              })
+            );
+          }
+        } catch {}
+
+        const data = await updateMe({ token, payload: { name: checkedName.value, dob, city, gender, country } });
+        const nextUser = data?.user || null;
+        if (nextUser) setAuth({ token, user: nextUser });
+        setKycMode('dateOnly');
+      } catch (e) {
+        const msg = String(e?.message || 'REQUEST_FAILED');
+        if (msg === 'INVALID_NAME') {
+          setKycError('Tên không hợp lệ.');
+          return;
+        }
+        if (msg === 'NAME_INAPPROPRIATE') {
+          setKycError('Tên không phù hợp. Vui lòng nhập tên lịch sự.');
+          return;
+        }
+        if (msg === 'UNAUTHORIZED') {
+          setKycError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+          return;
+        }
+        setKycError(msg);
+        return;
+      } finally {
+        setKycSaving(false);
+      }
+      return;
+    }
+
     const dateStr = String(bookingDate || '').trim();
     if (!dateStr) {
       setKycError('Vui lòng chọn ngày đặt lịch.');
@@ -544,83 +684,26 @@ const BuildDetail = () => {
       return;
     }
 
-    const mode = String(kycMode || 'full');
-    const rawName = mode === 'dateOnly' ? String(user?.name || '').trim() : `${String(kycLastName || '').trim()} ${String(kycFirstName || '').trim()}`.trim();
-    const phone = mode === 'dateOnly' ? String(user?.phone || '').trim() : String(kycPhone || '').trim();
-    const city = mode === 'dateOnly' ? String(user?.city || '').trim() : String(kycCity || '').trim();
-    const gender = mode === 'dateOnly' ? String(user?.gender || '').trim() : String(kycGender || '').trim();
-    const country =
-      mode === 'dateOnly'
-        ? String(user?.country || '').trim()
-        : String(kycCountry || '').trim() === KYC_COUNTRY_OTHER
-          ? String(kycCountryOther || '').trim()
-          : String(kycCountry || '').trim();
-
-    if (mode !== 'dateOnly') {
-      if (rawName.length < 2) {
-        setKycError('Vui lòng nhập họ và tên (ít nhất 2 ký tự).');
-        return;
-      }
-      if (phone.length < 8 || !/^[0-9+()\s.-]+$/.test(phone)) {
-        setKycError('Vui lòng nhập số điện thoại hợp lệ.');
-        return;
-      }
-      if (city.length < 2) {
-        setKycError('Vui lòng nhập thành phố/tỉnh.');
-        return;
-      }
-      if (!['male', 'female', 'other'].includes(String(gender || '').toLowerCase())) {
-        setKycError('Vui lòng chọn giới tính.');
-        return;
-      }
-      if (country.length < 2) {
-        setKycError('Vui lòng chọn quốc gia.');
-        return;
-      }
-    } else {
-      if (!rawName || !phone || !city || !gender || !country) {
-        setKycMode('full');
-        setKycError('Vui lòng nhập KYC lần đầu (bao gồm giới tính và quốc gia) để những lần sau chỉ cần chọn ngày.');
-        return;
-      }
+    const rawName = String(user?.name || '').trim();
+    const city = String(user?.city || '').trim();
+    const gender = String(user?.gender || '').trim().toLowerCase();
+    const country = String(user?.country || '').trim();
+    const dob = toDateInputValue(user?.dob);
+    if (!rawName || !dob || !city || !['male', 'female'].includes(gender) || !country) {
+      setKycMode('full');
+      setKycError('Vui lòng nhập KYC trước khi đặt lịch.');
+      return;
     }
-
-    const name = rawName;
 
     setKycSaving(true);
     setKycError('');
     try {
-      if (mode !== 'dateOnly') {
-        try {
-          if (kycStorageKey) {
-            localStorage.setItem(
-              kycStorageKey,
-              JSON.stringify({
-                lastName: String(kycLastName || '').trim(),
-                firstName: String(kycFirstName || '').trim(),
-                phone: phone,
-                city: city,
-                gender: gender,
-                country: country
-              })
-            );
-          }
-        } catch {}
-
-        try {
-          const data = await updateMe({ token, payload: { name, phone, city, gender, country } });
-          const nextUser = data?.user || null;
-          if (nextUser) setAuth({ token, user: nextUser });
-        } catch {}
-      }
-
       const res = await createBooking({
         token,
         buildId: id,
         shopId: selectedShopId,
         timeSlot: timeSlotDate.toISOString(),
-        customerName: name,
-        customerPhone: phone,
+        customerName: rawName,
         customerCity: city,
         customerGender: gender,
         customerCountry: country
@@ -645,7 +728,7 @@ const BuildDetail = () => {
         return;
       }
       if (msg === 'SHOP_NOT_ACCEPTING') {
-        setKycError('Shop đang tạm dừng nhận khách. Vui lòng chọn shop khác.');
+        setKycError('Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.');
         return;
       }
       if (msg === 'SHOP_CLOSED_TODAY') {
@@ -739,6 +822,7 @@ const BuildDetail = () => {
             >
               Pháp lý: {legalStatus.toUpperCase()}
             </div>
+            <FollowButton itemType="build" itemId={id} size="xs" />
             <button
               type="button"
               onClick={() => setBookingOpen(true)}
@@ -773,8 +857,21 @@ const BuildDetail = () => {
                 {userName ? `${t('build_detail_by')} ${userName} • ` : ''}
                 {partsCount} {t('build_detail_parts')} • {t('leaderboard_views')} {views}
               </div>
-              <div className="mt-2 text-xs text-white/45">
-                ID: <span className="font-semibold text-white/60">#{id.slice(-10)}</span>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/45">
+                <span>ID:</span>
+                <span className="font-semibold text-white/70">{id}</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(id);
+                      setToast('Đã copy ID');
+                    } catch {}
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/70 transition hover:bg-white/10"
+                >
+                  Copy
+                </button>
               </div>
             </div>
 
@@ -934,6 +1031,7 @@ const BuildDetail = () => {
                     {visibleShops.map((s) => {
                       const sid = String(s?._id || '');
                       const active = sid && sid === selectedShopId;
+                      const isAccepting = s?.acceptingBookings !== false;
                       return (
                         <button
                           key={sid}
@@ -941,9 +1039,11 @@ const BuildDetail = () => {
                           onClick={() => {
                             setSelectedShopId(sid);
                           }}
+                          disabled={!isAccepting}
                           className={cx(
                             'text-left rounded-3xl border p-4 transition',
-                            active ? 'border-sky-400/35 bg-sky-500/10' : 'border-white/10 bg-black/20 hover:bg-black/30'
+                            !isAccepting ? 'cursor-not-allowed border-white/10 bg-black/10 opacity-70' : '',
+                            isAccepting && active ? 'border-sky-400/35 bg-sky-500/10' : isAccepting ? 'border-white/10 bg-black/20 hover:bg-black/30' : ''
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -962,12 +1062,20 @@ const BuildDetail = () => {
                                 Selected
                               </div>
                             ) : null}
+                            {!isAccepting ? (
+                              <div className="rounded-full border border-rose-400/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
+                                Tạm ngưng nhận
+                              </div>
+                            ) : null}
                             {s?.closedToday ? (
                               <div className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-100">
                                 Hôm nay nghỉ
                               </div>
                             ) : null}
                           </div>
+                          {!isAccepting ? (
+                            <div className="mt-2 text-xs text-white/55">Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.</div>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -984,10 +1092,26 @@ const BuildDetail = () => {
                       </div>
                     );
                   })()}
+                  {(() => {
+                    const picked = shops.find((x) => String(x?._id || '') === String(selectedShopId || ''));
+                    if (!picked || picked?.acceptingBookings !== false) return null;
+                    return (
+                      <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                        Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.
+                      </div>
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={onRequestBooking}
-                    disabled={bookingBusy || !selectedShopId}
+                    disabled={
+                      bookingBusy ||
+                      !selectedShopId ||
+                      (() => {
+                        const picked = shops.find((x) => String(x?._id || '') === String(selectedShopId || ''));
+                        return picked?.acceptingBookings === false;
+                      })()
+                    }
                     className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-bold text-zinc-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {bookingBusy ? 'Requesting…' : 'Request booking'}
@@ -995,7 +1119,13 @@ const BuildDetail = () => {
                   <button
                     type="button"
                     onClick={onOpenChat}
-                    disabled={!selectedShopId}
+                    disabled={
+                      !selectedShopId ||
+                      (() => {
+                        const picked = shops.find((x) => String(x?._id || '') === String(selectedShopId || ''));
+                        return picked?.acceptingBookings === false;
+                      })()
+                    }
                     className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-zinc-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Chat với shop
@@ -1019,12 +1149,12 @@ const BuildDetail = () => {
               <div className="relative overflow-hidden rounded-3xl border border-white/15 bg-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.35),0_40px_120px_-60px_rgba(0,0,0,0.95)] backdrop-blur-2xl">
                 <div className="border-b border-white/10 px-6 py-5">
                   <div className="text-[22px] font-black leading-tight tracking-tight text-zinc-50">
-                    {kycMode === 'dateOnly' ? 'Chọn ngày đặt lịch' : 'Thông tin khách hàng (KYC)'}
+                    {kycMode === 'dateOnly' ? 'Đặt lịch' : 'Thông tin khách hàng (KYC)'}
                   </div>
                   <div className="mt-1 text-sm text-zinc-200/80">
                     {kycMode === 'dateOnly'
-                      ? 'Tài khoản đã KYC. Những lần sau chỉ cần chọn ngày.'
-                      : 'Vui lòng nhập thông tin 1 lần để những lần sau chỉ cần chọn ngày.'}
+                      ? 'Chọn ngày để đặt lịch.'
+                      : 'Nhập đủ thông tin để mở bước đặt lịch.'}
                   </div>
                 </div>
 
@@ -1054,23 +1184,13 @@ const BuildDetail = () => {
                     </div>
                   </div>
                   <label className="block">
-                    <div className="text-sm font-medium text-zinc-200">Số điện thoại</div>
+                    <div className="text-sm font-medium text-zinc-200">Ngày tháng năm sinh</div>
                     <input
-                      value={kycPhone}
-                      onChange={(e) => setKycPhone(e.target.value)}
+                      type="date"
+                      value={kycDob}
+                      max={todayIso}
+                      onChange={(e) => setKycDob(e.target.value)}
                       className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
-                      placeholder="VD: 0901234567"
-                      disabled={kycSaving}
-                      inputMode="tel"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="text-sm font-medium text-zinc-200">Thành phố / Tỉnh</div>
-                    <input
-                      value={kycCity}
-                      onChange={(e) => setKycCity(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
-                      placeholder="VD: TP.HCM"
                       disabled={kycSaving}
                     />
                   </label>
@@ -1085,8 +1205,17 @@ const BuildDetail = () => {
                       <option value="">Chọn giới tính</option>
                       <option value="male">Nam</option>
                       <option value="female">Nữ</option>
-                      <option value="other">Khác</option>
                     </select>
+                  </label>
+                  <label className="block">
+                    <div className="text-sm font-medium text-zinc-200">Thành phố / Tỉnh</div>
+                    <input
+                      value={kycCity}
+                      onChange={(e) => setKycCity(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
+                      placeholder="VD: TP.HCM"
+                      disabled={kycSaving}
+                    />
                   </label>
                   <label className="block">
                     <div className="text-sm font-medium text-zinc-200">Quốc gia</div>
@@ -1116,17 +1245,19 @@ const BuildDetail = () => {
                   </label>
                 </>
               )}
-              <label className="block">
-                <div className="text-sm font-medium text-zinc-200">Ngày đặt lịch</div>
-                <input
-                  type="date"
-                  value={bookingDate}
-                  min={todayIso}
-                  onChange={(e) => setBookingDate(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
-                  disabled={kycSaving}
-                />
-              </label>
+              {kycMode === 'dateOnly' ? (
+                <label className="block">
+                  <div className="text-sm font-medium text-zinc-200">Ngày đặt lịch</div>
+                  <input
+                    type="date"
+                    value={bookingDate}
+                    min={todayIso}
+                    onChange={(e) => setBookingDate(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-300/70 bg-white/90 px-3 py-2.5 text-[16px] text-zinc-900 shadow-[0_1px_0_rgba(255,255,255,0.06)] outline-none focus:border-sky-500/70 focus:ring-4 focus:ring-sky-400/20"
+                    disabled={kycSaving}
+                  />
+                </label>
+              ) : null}
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
@@ -1139,11 +1270,11 @@ const BuildDetail = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={saveKycAndBook}
+                  onClick={onKycPrimaryAction}
                   disabled={kycSaving}
                   className="rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-zinc-950 shadow-[0_10px_30px_rgba(14,165,233,0.20)] transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-300 disabled:shadow-none"
                 >
-                  {kycSaving ? 'Đang lưu…' : 'Lưu & đặt lịch'}
+                  {kycSaving ? 'Đang xử lý…' : kycMode === 'dateOnly' ? 'Đặt lịch' : 'Tiếp tục'}
                 </button>
               </div>
                 </div>

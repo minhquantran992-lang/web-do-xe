@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { getParts } from '../services/api/parts.js';
+import FollowButton from '../components/FollowButton.jsx';
 import { useI18n } from '../services/i18n.jsx';
 
 const Parts = () => {
@@ -98,8 +99,14 @@ const Parts = () => {
               {p.thumbnailUrl ? <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : null}
             </div>
             <div className="space-y-2 p-4">
-              <div className="text-sm font-semibold text-zinc-100">{p.name || 'Part'}</div>
-              <div className="text-xs text-zinc-400">{TYPE_LABEL[p.type] || p.type || 'Accessory'}</div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-zinc-100">{p.name || 'Part'}</div>
+                  <div className="mt-1 text-xs text-zinc-400">{TYPE_LABEL[p.type] || p.type || 'Accessory'}</div>
+                </div>
+                <FollowButton itemType="part" itemId={p._id} size="xs" />
+              </div>
+              {Number(p?.price) ? <div className="text-xs font-semibold text-zinc-200">{Number(p.price)} đ</div> : null}
               {p.modelUrl ? (
                 <a className="text-xs text-sky-300 hover:text-sky-200" href={p.modelUrl} target="_blank" rel="noreferrer">
                   {t('parts_view_model')}

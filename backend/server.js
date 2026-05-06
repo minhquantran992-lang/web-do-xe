@@ -9,6 +9,7 @@ const { seedIfEmpty } = require('./src/seed/seed');
 const User = require('./src/models/User');
 const { backfillSearchText } = require('./src/utils/backfillSearchText');
 const { expirePendingBookings } = require('./src/controllers/bookingsController');
+const { expireQuotedOrders } = require('./src/controllers/ordersController');
 
 const port = Number(process.env.PORT || 5000);
 
@@ -66,6 +67,20 @@ const start = async () => {
       console.warn('[booking] expiry sweep failed:', e?.message || e);
     } finally {
       bookingSweepBusy = false;
+    }
+  }, 20_000);
+
+  let orderSweepBusy = false;
+  setInterval(async () => {
+    if (orderSweepBusy) return;
+    orderSweepBusy = true;
+    try {
+      const count = await expireQuotedOrders();
+      if (count) console.log(`[order] auto-cancelled ${count} quoted order(s)`);
+    } catch (e) {
+      console.warn('[order] expiry sweep failed:', e?.message || e);
+    } finally {
+      orderSweepBusy = false;
     }
   }, 20_000);
 };

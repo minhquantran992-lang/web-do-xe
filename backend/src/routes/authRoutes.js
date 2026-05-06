@@ -184,6 +184,7 @@ router.get('/google/callback', (req, res, next) => {
     if (!profile) return res.redirect(buildRedirectUrl({ base: frontendBase, error: 'OAUTH_FAILED' }));
     try {
       const result = await beginOAuthOtpLogin(profile);
+      if (result?.token) return res.redirect(buildRedirectUrl({ base: frontendBase, token: result.token }));
       return res.redirect(buildRedirectUrl({ base: frontendBase, otp: 1, ticket: result.ticket }));
     } catch (e) {
       const code = String(e?.message || 'OAUTH_FAILED');

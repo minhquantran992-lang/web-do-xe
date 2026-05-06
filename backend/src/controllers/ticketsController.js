@@ -167,6 +167,7 @@ const createMyTicket = asyncHandler(async (req, res) => {
   const booking = await Booking.findOne({ _id: bookingId, userId }).lean();
   if (!booking) return res.status(404).json({ error: 'BOOKING_NOT_FOUND' });
   if (String(booking.status || '').toLowerCase() !== 'completed') return res.status(409).json({ error: 'BOOKING_NOT_COMPLETED' });
+  if (booking.handoverAcceptedAt) return res.status(409).json({ error: 'BOOKING_FINALIZED' });
 
   const existing = await Ticket.findOne({
     bookingId: new mongoose.Types.ObjectId(bookingId),

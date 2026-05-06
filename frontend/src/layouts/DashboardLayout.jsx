@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 import { useI18n } from '../services/i18n.jsx';
 import SearchBar from '../components/SearchBar.jsx';
 import { changePassword, requestReset, resetByCode, verifyResetCode } from '../services/api/auth.js';
+import { listNotifications, markAllNotificationsRead, markNotificationRead } from '../services/api/notifications.js';
 
 const DashboardLayout = () => {
   const { user, token, logout } = useAuth();
@@ -26,6 +27,12 @@ const DashboardLayout = () => {
   const [pwdOtpSending, setPwdOtpSending] = useState(false);
   const [pwdOtpVerified, setPwdOtpVerified] = useState(false);
   const [pwdOtpVerifying, setPwdOtpVerifying] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notif, setNotif] = useState({ loading: false, error: '', unreadCount: 0, items: [] });
+  const [notifToast, setNotifToast] = useState('');
+  const notifToastTimerRef = useRef(0);
+  const lastNotifTopIdRef = useRef('');
+  const lastUnreadRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -42,11 +49,60 @@ const DashboardLayout = () => {
 
   const isHome = String(loc?.pathname || '') === '/dashboard';
 
+  const refreshNotifications = useCallback(
+    async ({ silent } = {}) => {
+      if (!token) return;
+      if (!silent) setNotif((p) => ({ ...p, loading: true, error: '' }));
+      try {
+        const data = await listNotifications({ token, limit: 8, skip: 0 });
+        const items = Array.isArray(data?.items) ? data.items : [];
+        const unreadCount = Number(data?.unreadCount) || 0;
+        const topId = String(items?.[0]?._id || '');
+        const topContent = String(items?.[0]?.content || items?.[0]?.type || '').trim();
+
+        if (unreadCount > lastUnreadRef.current && topId && topId !== lastNotifTopIdRef.current && topContent) {
+          setNotifToast(topContent);
+          if (notifToastTimerRef.current) window.clearTimeout(notifToastTimerRef.current);
+          notifToastTimerRef.current = window.setTimeout(() => setNotifToast(''), 4500);
+        }
+
+        setNotif({
+          loading: false,
+          error: '',
+          unreadCount,
+          items
+        });
+        lastUnreadRef.current = unreadCount;
+        lastNotifTopIdRef.current = topId;
+      } catch (e) {
+        setNotif((p) => ({ ...p, loading: false, error: String(e?.message || 'FAILED_TO_LOAD') }));
+      }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    if (!token) return;
+    refreshNotifications({ silent: true });
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      refreshNotifications({ silent: true });
+    }, 8000);
+    return () => window.clearInterval(id);
+  }, [refreshNotifications, token]);
+
   useEffect(() => {
     setAccountOpen(false);
     setMobileOpen(false);
     setPwdOpen(false);
+    setNotifOpen(false);
   }, [loc?.pathname]);
+
+  useEffect(() => {
+    return () => {
+      if (notifToastTimerRef.current) window.clearTimeout(notifToastTimerRef.current);
+    };
+  }, []);
 
   const userLabel = String(user?.name || user?.fullName || user?.email || '').trim();
   const userInitials = (() => {
@@ -221,7 +277,7 @@ const DashboardLayout = () => {
   };
 
   const linkBase =
-    'group relative flex items-center overflow-hidden rounded-2xl border text-sm font-semibold transition duration-200 ease-out will-change-transform focus:outline-none focus:ring-2 focus:ring-sky-500/40 hover:scale-[1.02]';
+    'group relative flex items-center overflow-hidden rounded-2xl border text-sm font-semibold transition duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-sky-500/40';
   const linkActive =
     'border-sky-400/45 bg-gradient-to-r from-sky-500/30 via-cyan-500/18 to-sky-500/30 text-zinc-50 shadow-[0_20px_70px_-46px_rgba(56,189,248,0.70),0_0_0_1px_rgba(56,189,248,0.22)]';
   const linkIdle =
@@ -247,6 +303,33 @@ const DashboardLayout = () => {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={cls}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16l-1.5 13h-13L4 7z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M8 7a4 4 0 018 0" />
+        </svg>
+      );
+    if (name === 'star')
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={cls}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 3l2.65 5.55 6.12.9-4.43 4.32 1.05 6.11L12 17.9 6.61 20.88l1.05-6.11-4.43-4.32 6.12-.9L12 3z"
+          />
+        </svg>
+      );
+    if (name === 'trophy')
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={cls}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 4h8v3a4 4 0 01-8 0V4z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 6H4a2 2 0 00-2 2v1a4 4 0 004 4" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M18 6h2a2 2 0 012 2v1a4 4 0 01-4 4" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v3" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 21h8" />
+        </svg>
+      );
+    if (name === 'orders')
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={cls}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6M9 11h6M9 15h4" />
         </svg>
       );
     if (name === 'shop')
@@ -320,6 +403,9 @@ const DashboardLayout = () => {
     const Body = ({ active }) => (
       <>
         {active ? (
+          <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-sky-300 via-cyan-300 to-sky-400 opacity-90" />
+        ) : null}
+        {active ? (
           <span className="pointer-events-none absolute -inset-1 rounded-[18px] bg-[radial-gradient(400px_180px_at_18%_18%,rgba(56,189,248,0.38),transparent_62%)] opacity-90 blur-xl" />
         ) : null}
         <span
@@ -327,12 +413,12 @@ const DashboardLayout = () => {
             'relative inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition duration-200',
             active
               ? 'border-white/10 bg-white/10 text-zinc-50 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]'
-              : 'border-white/10 bg-white/5 text-sky-200 group-hover:border-sky-400/25 group-hover:bg-sky-500/10'
+              : 'border-white/10 bg-white/5 text-zinc-200 group-hover:border-sky-400/25 group-hover:bg-sky-500/10'
           ].join(' ')}
         >
           <Icon name={icon} className={active ? 'text-zinc-50' : ''} />
         </span>
-        <span className={`${collapsed ? 'sr-only' : 'min-w-0 flex-1 truncate text-left text-[13px] font-semibold'}`}>
+        <span className={`${collapsed ? 'sr-only' : 'min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-wide'}`}>
           {label}
         </span>
         {showTooltip ? (
@@ -350,7 +436,7 @@ const DashboardLayout = () => {
           to={to}
           title={showTooltip ? label : undefined}
           className={({ isActive }) =>
-            `${linkBase} ${collapsed ? 'justify-center px-2.5 py-2.5' : 'gap-3 px-4 py-3'} ${isActive ? linkActive : linkIdle}`
+            `${linkBase} ${collapsed ? 'justify-center px-2.5 py-2.5' : 'gap-3 px-3.5 py-2.5'} ${isActive ? linkActive : linkIdle}`
           }
           onClick={() => setMobileOpen(false)}
         >
@@ -365,7 +451,7 @@ const DashboardLayout = () => {
         title={showTooltip ? label : undefined}
         onClick={onClick}
         disabled={disabled}
-        className={`${linkBase} ${collapsed ? 'justify-center px-2.5 py-2.5' : 'gap-3 px-4 py-3'} ${disabled ? 'opacity-60' : ''}`}
+        className={`${linkBase} ${collapsed ? 'justify-center px-2.5 py-2.5' : 'gap-3 px-3.5 py-2.5'} ${disabled ? 'opacity-60' : ''}`}
       >
         <Body active={false} />
       </button>
@@ -415,11 +501,17 @@ const DashboardLayout = () => {
                       <stop offset="1" stopColor="#22d3ee" />
                     </linearGradient>
                   </defs>
-                  <g fill="none" stroke="url(#elorideMarkGradDash)" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M50 70c22-26 64-26 86 0" />
-                    <path d="M50 100h96l-16-16m16 16-16 16" />
-                    <path d="M50 130c22 26 64 26 86 0" />
-                    <path d="M70 70v60" />
+                  <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <g stroke="url(#elorideMarkGradDash)" strokeWidth="18">
+                      <path d="M44 78C74 46 126 46 158 70H168" />
+                      <path d="M44 100H166l-18-18m18 18-18 18" />
+                      <path d="M44 122C74 154 126 154 158 130H168" />
+                    </g>
+                    <g stroke="#070b14" strokeWidth="10" opacity="0.95">
+                      <path d="M44 78C74 46 126 46 158 70H168" />
+                      <path d="M44 100H166l-18-18m18 18-18 18" />
+                      <path d="M44 122C74 154 126 154 158 130H168" />
+                    </g>
                   </g>
                 </svg>
               </span>
@@ -434,17 +526,23 @@ const DashboardLayout = () => {
                         <stop offset="1" stopColor="#22d3ee" />
                       </linearGradient>
                     </defs>
-                    <g fill="none" stroke="url(#elorideMarkGradDashWord)" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M50 70c22-26 64-26 86 0" />
-                      <path d="M50 100h96l-16-16m16 16-16 16" />
-                      <path d="M50 130c22 26 64 26 86 0" />
-                      <path d="M70 70v60" />
+                    <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+                      <g stroke="url(#elorideMarkGradDashWord)" strokeWidth="18">
+                        <path d="M44 78C74 46 126 46 158 70H168" />
+                        <path d="M44 100H166l-18-18m18 18-18 18" />
+                        <path d="M44 122C74 154 126 154 158 130H168" />
+                      </g>
+                      <g stroke="#070b14" strokeWidth="10" opacity="0.95">
+                        <path d="M44 78C74 46 126 46 158 70H168" />
+                        <path d="M44 100H166l-18-18m18 18-18 18" />
+                        <path d="M44 122C74 154 126 154 158 130H168" />
+                      </g>
                     </g>
                   </svg>
                   <span className="min-w-0 text-left">
-                    <span className="block whitespace-nowrap text-[16px] font-black leading-none tracking-[0.18em] text-white">ELORIDE</span>
-                    <span className="mt-1 block truncate text-[10px] font-semibold leading-none tracking-[0.12em] text-white/70">
-                      MOD YOUR RIDE • SYSTEM CUSTOMS
+                    <span className="block whitespace-nowrap text-[16px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
+                    <span className="mt-1 block truncate text-[10px] font-semibold leading-none tracking-[0.22em] text-white/70">
+                      MOD YOUR RIDE | SYSTEM CUSTOMS
                     </span>
                   </span>
                 </span>
@@ -459,6 +557,9 @@ const DashboardLayout = () => {
             <SidebarNavItem to="/dashboard" label={t('nav_home')} icon="home" />
             <SidebarNavItem to="/custom" label={t('nav_custom')} icon="custom" />
             <SidebarNavItem to="/marketplace" label={t('nav_marketplace')} icon="market" />
+            <SidebarNavItem to="/following" label={t('nav_following')} icon="star" />
+            <SidebarNavItem to="/leaderboard" label={t('leaderboard_title')} icon="trophy" />
+            <SidebarNavItem to="/orders" label={t('nav_orders')} icon="orders" />
             {String(user?.role || '').toUpperCase() === 'VENDOR' ? (
               <SidebarNavItem to="/seller-center" label={t('nav_shop')} icon="shop" />
             ) : null}
@@ -479,7 +580,29 @@ const DashboardLayout = () => {
   };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-zinc-950 text-zinc-100">
+    <div
+      className="relative min-h-screen overflow-x-hidden text-zinc-100"
+      style={{
+        backgroundImage:
+          'radial-gradient(900px 480px at 14% 0%, rgba(56,189,248,0.22), transparent 60%), radial-gradient(760px 520px at 86% 18%, rgba(168,85,247,0.14), transparent 62%), radial-gradient(860px 560px at 74% 96%, rgba(34,211,238,0.12), transparent 60%), linear-gradient(180deg, #070b14 0%, #05060a 65%, #04040a 100%)'
+      }}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.16]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, rgba(255,255,255,0.10) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.10) 1px, transparent 1px)',
+          backgroundSize: '84px 84px'
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/0 via-black/10 to-black/35" />
+      {notifToast ? (
+        <div className="fixed inset-x-0 top-4 z-[120] flex justify-center px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-sky-100 shadow-2xl shadow-black/40 backdrop-blur-2xl">
+            {notifToast}
+          </div>
+        </div>
+      ) : null}
       {(() => {
         const path = String(loc?.pathname || '');
         const isProfile = path === '/profile' || path.startsWith('/profile/');
@@ -739,72 +862,204 @@ const DashboardLayout = () => {
         </>
       ) : null}
 
-      {isHome && accountOpen ? (
+      {isHome && (accountOpen || notifOpen) ? (
         <button
           type="button"
           className="fixed inset-0 z-40 bg-transparent"
           aria-label={t('seller_common_close')}
-          onClick={() => setAccountOpen(false)}
+          onClick={() => {
+            setAccountOpen(false);
+            setNotifOpen(false);
+          }}
         />
       ) : null}
 
       {isHome ? (
-        <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggle}
-            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
-          >
-            {lang === 'vi' ? t('lang_en') : t('lang_vi')}
-          </button>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setAccountOpen((v) => !v)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
-            >
-              <span className="grid h-7 w-7 place-items-center rounded-xl border border-white/10 bg-black/20 text-[11px] font-black text-white/90">
-                {userInitials}
-              </span>
-              <span className="hidden max-w-[160px] truncate sm:block">{userLabel || t('common_account')}</span>
-            </button>
-
-            {accountOpen ? (
-              <div className="absolute right-0 mt-2 w-[200px] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
-                <Link
-                  to="/profile"
-                  onClick={() => setAccountOpen(false)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block px-4 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/5"
-                >
-                  {t('register_btn_edit_account')}
-                </Link>
+        <header className="sticky top-0 z-50 border-b border-white/10 bg-zinc-950/70 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
+            {(() => {
+              const path = String(loc?.pathname || '');
+              const isProfile = path === '/profile' || path.startsWith('/profile/');
+              const showSidebar = !isProfile;
+              return showSidebar ? (
                 <button
                   type="button"
-                  onClick={openPasswordModal}
-                  className="w-full px-4 py-3 text-left text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                  onClick={() => setMobileOpen(true)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10 lg:hidden"
+                  aria-label={t('sidebar_open')}
                 >
-                  {t('auth_change_password_title')}
+                  <Icon name="menu" />
                 </button>
+              ) : null;
+            })()}
+
+            <div className="min-w-0 flex-1">
+              <SearchBar />
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <div className="relative">
                 <button
                   type="button"
                   onClick={() => {
                     setAccountOpen(false);
-                    logout();
+                    setNotifOpen((v) => !v);
+                    refreshNotifications({});
                   }}
-                  className="w-full px-4 py-3 text-left text-sm font-semibold text-red-200 hover:bg-red-500/10"
+                  className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
+                  aria-label={t('nav_notifications')}
                 >
-                  {t('nav_logout')}
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a3 3 0 006 0" />
+                  </svg>
+                  {notif.unreadCount ? (
+                    <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-sky-400 px-1 text-[11px] font-black text-zinc-950">
+                      {Math.min(99, Number(notif.unreadCount) || 0)}
+                    </span>
+                  ) : null}
                 </button>
+
+                {notifOpen ? (
+                  <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
+                    <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+                      <div className="text-sm font-semibold text-zinc-100">{t('notifications_title')}</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!token) return;
+                            await markAllNotificationsRead({ token });
+                            await refreshNotifications({});
+                          }}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
+                        >
+                          {t('notifications_mark_all')}
+                        </button>
+                        <Link
+                          to="/notifications"
+                          onClick={() => setNotifOpen(false)}
+                          className="rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/15"
+                        >
+                          {t('nav_notifications')}
+                        </Link>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[420px] overflow-y-auto p-2">
+                      {!notif.items.length ? (
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-300">
+                          {t('notifications_empty')}
+                        </div>
+                      ) : (
+                        notif.items.slice(0, 8).map((n) => {
+                          const id = String(n?._id || '');
+                          const isRead = Boolean(n?.isRead);
+                          const content = String(n?.content || '').trim() || String(n?.type || '').trim();
+                          const meta = n?.meta && typeof n.meta === 'object' ? n.meta : null;
+                          const orderId = String(meta?.orderId || '').trim();
+                          const itemType = String(meta?.itemType || '').trim();
+                          const itemId = String(meta?.itemId || '').trim();
+                          const to = orderId
+                            ? `/orders/${encodeURIComponent(orderId)}`
+                            : itemType === 'build' && itemId
+                              ? `/builds/${encodeURIComponent(itemId)}`
+                              : itemType === 'part'
+                                ? '/parts'
+                                : '';
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={async () => {
+                                if (!token || !id) return;
+                                if (!isRead) await markNotificationRead({ token, id });
+                                await refreshNotifications({ silent: true });
+                                setNotifOpen(false);
+                                if (to) window.location.href = to;
+                              }}
+                              className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                                isRead
+                                  ? 'border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10'
+                                  : 'border-sky-400/20 bg-sky-500/10 text-zinc-50 hover:bg-sky-500/15'
+                              }`}
+                            >
+                              <div className="font-semibold">{content}</div>
+                              {n?.createdAt ? (
+                                <div className="mt-1 text-xs text-zinc-400">{new Date(n.createdAt).toLocaleString()}</div>
+                              ) : null}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+
+              <Link
+                to="/partner-application"
+                className="inline-flex h-10 items-center justify-center rounded-2xl border border-sky-400/25 bg-sky-500/10 px-3 text-xs font-semibold text-sky-100 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:border-sky-400/40 hover:bg-sky-500/15"
+              >
+                {t('lp_cta_partner_shop')}
+              </Link>
+              <button
+                type="button"
+                onClick={toggle}
+                className="inline-flex h-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
+              >
+                {lang === 'vi' ? t('lang_en') : t('lang_vi')}
+              </button>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setAccountOpen((v) => !v)}
+                  className="inline-flex h-10 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
+                >
+                  <span className="grid h-7 w-7 place-items-center rounded-xl border border-white/10 bg-black/20 text-[11px] font-black text-white/90">
+                    {userInitials}
+                  </span>
+                  <span className="hidden max-w-[160px] truncate sm:block">{userLabel || t('common_account')}</span>
+                </button>
+
+                {accountOpen ? (
+                  <div className="absolute right-0 mt-2 w-[200px] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
+                    <Link
+                      to="/profile"
+                      onClick={() => setAccountOpen(false)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block px-4 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                    >
+                      {t('register_btn_edit_account')}
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={openPasswordModal}
+                      className="w-full px-4 py-3 text-left text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                    >
+                      {t('auth_change_password_title')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountOpen(false);
+                        logout();
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-semibold text-red-200 hover:bg-red-500/10"
+                    >
+                      {t('nav_logout')}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
-        </div>
+        </header>
       ) : null}
 
-      {showSidebar ? (
+      {showSidebar && !isHome ? (
         <>
           <button
             type="button"
@@ -844,13 +1099,6 @@ const DashboardLayout = () => {
         ) : null}
 
         <main className={showSidebar ? 'min-w-0 flex-1' : ''}>
-          {isHome ? (
-            <div className="mb-5 flex justify-center">
-              <div className="w-full max-w-[560px]">
-                <SearchBar />
-              </div>
-            </div>
-          ) : null}
           <Outlet />
         </main>
       </div>

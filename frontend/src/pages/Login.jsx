@@ -50,6 +50,13 @@ const Login = () => {
   }, [location.search]);
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const prefill = String(params.get('email') || '').trim();
+    if (!prefill) return;
+    setEmail((prev) => prev || prefill);
+  }, [location.search]);
+
+  useEffect(() => {
     sessionStorage.setItem('post_auth_redirect', next);
   }, [next]);
 
@@ -108,15 +115,21 @@ const Login = () => {
                           <stop offset="1" stopColor="#22d3ee" />
                         </linearGradient>
                       </defs>
-                      <g fill="none" stroke="url(#elorideMarkGradLogin)" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M50 70c22-26 64-26 86 0" />
-                        <path d="M50 100h96l-16-16m16 16-16 16" />
-                        <path d="M50 130c22 26 64 26 86 0" />
-                        <path d="M70 70v60" />
+                      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+                        <g stroke="url(#elorideMarkGradLogin)" strokeWidth="18">
+                          <path d="M44 78C74 46 126 46 158 70H168" />
+                          <path d="M44 100H166l-18-18m18 18-18 18" />
+                          <path d="M44 122C74 154 126 154 158 130H168" />
+                        </g>
+                        <g stroke="#070b14" strokeWidth="10" opacity="0.95">
+                          <path d="M44 78C74 46 126 46 158 70H168" />
+                          <path d="M44 100H166l-18-18m18 18-18 18" />
+                          <path d="M44 122C74 154 126 154 158 130H168" />
+                        </g>
                       </g>
                     </svg>
                     <span className="min-w-0 text-left">
-                      <span className="block text-[18px] font-black leading-none tracking-[0.34em] text-white">ELORIDE</span>
+                      <span className="block text-[18px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
                       <span className="mt-1 block text-[9px] font-semibold leading-none tracking-[0.22em] text-white/70">
                         MOD YOUR RIDE | SYSTEM CUSTOMS
                       </span>

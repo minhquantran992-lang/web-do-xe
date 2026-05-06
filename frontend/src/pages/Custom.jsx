@@ -158,7 +158,7 @@ const Custom = () => {
               <div className="mt-2 text-sm text-zinc-400">{t('custom_desc')}</div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="grid w-full grid-cols-3 gap-2 md:w-[320px] md:shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -169,8 +169,8 @@ const Custom = () => {
                 }}
                 className={
                   vehicleType === 'pkl'
-                    ? 'rounded-xl bg-sky-400 px-3 py-2 text-xs font-semibold text-zinc-950'
-                    : 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10'
+                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
+                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
                 }
               >
                 {t('category_pkl')}
@@ -185,8 +185,8 @@ const Custom = () => {
                 }}
                 className={
                   vehicleType === 'scooter'
-                    ? 'rounded-xl bg-sky-400 px-3 py-2 text-xs font-semibold text-zinc-950'
-                    : 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10'
+                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
+                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
                 }
               >
                 {t('category_scooter')}
@@ -201,8 +201,8 @@ const Custom = () => {
                 }}
                 className={
                   vehicleType === 'oto'
-                    ? 'rounded-xl bg-sky-400 px-3 py-2 text-xs font-semibold text-zinc-950'
-                    : 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10'
+                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
+                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
                 }
               >
                 {t('category_oto')}

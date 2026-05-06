@@ -42,6 +42,14 @@ const isNetworkishError = (err) => {
   return false;
 };
 
+const emitApiError = (detail) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent('carbanana:api-error', { detail: detail && typeof detail === 'object' ? detail : {} }));
+  } catch {}
+};
+
 const probeHealth = async (base) => {
   const r = await fetchWithTimeout(
     `${base}/health?ts=${Date.now()}`,
@@ -70,6 +78,9 @@ const doFetch = async (base, path, { token, method, body }) => {
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status >= 500) {
+      emitApiError({ kind: 'server', status: res.status, path, base, message: String(data?.error || 'REQUEST_FAILED') });
+    }
     const error = new Error(data?.error || 'REQUEST_FAILED');
     error.status = res.status;
     error.data = data;
@@ -94,6 +105,9 @@ const doFetchForm = async (base, path, { token, method, formData }) => {
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status >= 500) {
+      emitApiError({ kind: 'server', status: res.status, path, base, message: String(data?.error || 'REQUEST_FAILED') });
+    }
     const error = new Error(data?.error || 'REQUEST_FAILED');
     error.status = res.status;
     error.data = data;
@@ -156,6 +170,11 @@ export const apiFetch = async (path, opts = {}) => {
         } catch {}
       }
     }
+    if (isNetworkishError(err)) {
+      emitApiError({ kind: 'network', status: Number(err?.status) || 0, path, base: String(SELECTED_BASE || ''), message: String(err?.message || 'NETWORK_ERROR') });
+    } else if (Number(err?.status) >= 500) {
+      emitApiError({ kind: 'server', status: Number(err?.status) || 500, path, base: String(SELECTED_BASE || ''), message: String(err?.message || 'SERVER_ERROR') });
+    }
     throw err;
   }
 };
@@ -181,6 +200,11 @@ export const apiFetchForm = async (path, opts = {}) => {
           }
         } catch {}
       }
+    }
+    if (isNetworkishError(err)) {
+      emitApiError({ kind: 'network', status: Number(err?.status) || 0, path, base: String(SELECTED_BASE || ''), message: String(err?.message || 'NETWORK_ERROR') });
+    } else if (Number(err?.status) >= 500) {
+      emitApiError({ kind: 'server', status: Number(err?.status) || 500, path, base: String(SELECTED_BASE || ''), message: String(err?.message || 'SERVER_ERROR') });
     }
     throw err;
   }

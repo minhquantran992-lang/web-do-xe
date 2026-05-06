@@ -8,6 +8,10 @@ body,
   height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 .car2d-stage {
   position: relative;
   width: 100%;
@@ -79,5 +83,50 @@ select {
 select option {
   background-color: #0b1220;
   color: #e2e8f0;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes inkRipple {
+  0% {
+    transform: scale(0.15);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.ink-ripple {
+  transform: scale(0.15);
+  opacity: 0.55;
+  animation: inkRipple 420ms ease-out forwards;
+}
+
+@keyframes orderFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.0);
+    border-color: rgba(56, 189, 248, 0.2);
+  }
+  40% {
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+    border-color: rgba(56, 189, 248, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.0);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.order-flash {
+  animation: orderFlash 240ms ease-out;
 }
 

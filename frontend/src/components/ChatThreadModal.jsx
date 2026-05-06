@@ -42,7 +42,7 @@ const ChatThreadModal = ({ open, onClose, mode = 'user', shopId, userId }) => {
       return String(u?.email || '').trim();
     }
     const s = thread?.shop || null;
-    if (s?.acceptingBookings === false) return 'Shop đang tạm dừng nhận khách';
+    if (s?.acceptingBookings === false) return 'Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.';
     return '';
   }, [mode, thread?.shop, thread?.user]);
 

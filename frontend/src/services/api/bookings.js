@@ -22,13 +22,37 @@ export const getMyBooking = async ({ token, id }) => {
   return apiFetch(`/api/bookings/${encodeURIComponent(String(id || ''))}`, { token });
 };
 
+export const listMyBookings = async ({ token, status } = {}) => {
+  const qs = status ? `?status=${encodeURIComponent(String(status))}` : '';
+  return apiFetch(`/api/bookings/my${qs}`, { token });
+};
+
+export const confirmMyBooking = async ({ token, id }) => {
+  return apiFetch(`/api/bookings/${encodeURIComponent(String(id || ''))}/confirm`, { token, method: 'POST' });
+};
+
+export const rejectMyBooking = async ({ token, id, reason }) => {
+  return apiFetch(`/api/bookings/${encodeURIComponent(String(id || ''))}/reject`, {
+    token,
+    method: 'POST',
+    body: { reason: String(reason || '').trim() }
+  });
+};
+
+export const finishMyBooking = async ({ token, id }) => {
+  return apiFetch(`/api/bookings/${encodeURIComponent(String(id || ''))}/finish`, { token, method: 'POST' });
+};
+
 export const listVendorBookings = async ({ token, status } = {}) => {
   const qs = status ? `?status=${encodeURIComponent(String(status))}` : '';
   return apiFetch(`/api/vendor/bookings${qs}`, { token });
 };
 
-export const acceptVendorBooking = async ({ token, id, timeSlot }) => {
-  const body = timeSlot ? { timeSlot } : undefined;
+export const acceptVendorBooking = async ({ token, id, timeSlot, quotedPrice, quoteNote }) => {
+  const body = {};
+  if (timeSlot) body.timeSlot = timeSlot;
+  if (quotedPrice !== undefined) body.quotedPrice = quotedPrice;
+  if (quoteNote !== undefined) body.quoteNote = quoteNote;
   return apiFetch(`/api/vendor/bookings/${encodeURIComponent(String(id || ''))}/accept`, { token, method: 'POST', body });
 };
 

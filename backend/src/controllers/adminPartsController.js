@@ -4,6 +4,7 @@ const Part = require('../models/Part');
 const Configuration = require('../models/Configuration');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { buildSearchText } = require('../utils/search');
+const { notifyFollowers } = require('../services/notifications');
 
 const allowedSpecKeysByType = {
   exhaust: ['powerHp', 'torqueNm', 'weightKg', 'topSpeedKph'],
@@ -271,6 +272,19 @@ const updatePartAdmin = asyncHandler(async (req, res) => {
   }
 
   const updated = await Part.findByIdAndUpdate(id, patch, { new: true }).lean();
+
+  const prevPrice = Number(existing?.price) || 0;
+  const nextPrice = Number(updated?.price) || 0;
+  if (prevPrice !== nextPrice) {
+    const name = String(updated?.name || existing?.name || '').trim() || 'Sản phẩm';
+    await notifyFollowers({
+      itemType: 'part',
+      itemId: id,
+      type: 'PRICE_CHANGED',
+      content: `Giá sản phẩm bạn theo dõi vừa thay đổi: ${name} (${prevPrice} → ${nextPrice})`,
+      meta: { itemType: 'part', itemId: id, name, prevPrice, nextPrice }
+    });
+  }
 
   res.json({ item: updated });
 });

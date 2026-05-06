@@ -14,6 +14,17 @@ import { useI18n } from '../services/i18n.jsx';
 const Leaderboard = () => {
   const { t } = useI18n();
   const { isAuthed, token } = useAuth();
+  const formatDate = (value) => {
+    if (!value) return '—';
+    const d = value instanceof Date ? value : new Date(value);
+    if (!d || Number.isNaN(d.getTime())) return '—';
+    try {
+      return new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d);
+    } catch {
+      return d.toISOString().slice(0, 10);
+    }
+  };
+
   const resolveUrl = (u) => {
     const base = getApiBaseUrl();
     const raw = String(u || '').trim();
@@ -175,116 +186,102 @@ const Leaderboard = () => {
         {loading ? (
           <div className="mt-6 text-sm text-zinc-500">{t('common_loading')}</div>
         ) : ranked.length ? (
-          <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {ranked.map((row, idx) => {
-              const id = String(row?._id || '');
-              const carName = row?.carId?.name || '';
-              const buildName = String(row?.name || '').trim();
-              const userName = row?.userId?.name || '';
-              const title = buildName || carName || t('carcard_default');
-              const partsCount = (Array.isArray(row?.selectedParts) ? row.selectedParts.length : 0) + (row?.selectedWheels ? 1 : 0);
-              const likes = Number(row?.likesCount) || 0;
-              const likedByMe = Boolean(row?.likedByMe);
-              const favs = Number(row?.favoritesCount) || 0;
-              const favoritedByMe = Boolean(row?.favoritedByMe);
-              const views = Number(row?.viewsCount) || 0;
-              const busy = Boolean(busyById[id]);
-              const imageUrl = resolveUrl(row?.imageUrl || row?.thumbnailUrl || row?.carId?.thumbnailUrl);
+          <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+            <div className="overflow-x-auto">
+              <table className="min-w-[860px] w-full border-collapse">
+                <thead className="bg-black/25">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wider text-white/65">
+                    <th className="px-4 py-3">Pos</th>
+                    <th className="px-4 py-3">Bản độ</th>
+                    <th className="px-4 py-3">User</th>
+                    <th className="px-4 py-3">Ngày tạo</th>
+                    <th className="px-4 py-3 text-right">Bình chọn</th>
+                    <th className="px-4 py-3 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranked.map((row, idx) => {
+                    const id = String(row?._id || '');
+                    const carName = row?.carId?.name || '';
+                    const buildName = String(row?.name || '').trim();
+                    const userName = String(row?.userId?.name || '').trim();
+                    const title = buildName || carName || t('carcard_default');
+                    const partsCount = (Array.isArray(row?.selectedParts) ? row.selectedParts.length : 0) + (row?.selectedWheels ? 1 : 0);
+                    const likes = Number(row?.likesCount) || 0;
+                    const likedByMe = Boolean(row?.likedByMe);
+                    const favoritedByMe = Boolean(row?.favoritedByMe);
+                    const busy = Boolean(busyById[id]);
+                    const imageUrl = resolveUrl(row?.imageUrl || row?.thumbnailUrl || row?.carId?.thumbnailUrl);
+                    const createdAt = row?.publishedAt || row?.createdAt;
+                    const pos = idx + 1;
+                    const posTone =
+                      pos === 1
+                        ? 'border-amber-300/30 bg-amber-500/15 text-amber-100'
+                        : pos === 2
+                          ? 'border-white/15 bg-white/10 text-white/85'
+                          : pos === 3
+                            ? 'border-orange-300/25 bg-orange-500/10 text-orange-100'
+                            : 'border-white/10 bg-white/5 text-white/80';
 
-              return (
-                <div
-                  key={id || idx}
-                  className="group relative overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/60 shadow-[0_30px_120px_-80px_rgba(0,0,0,0.95)] transition hover:border-sky-400/25"
-                >
-                  <div className="absolute inset-0 bg-[radial-gradient(520px_260px_at_26%_0%,rgba(56,189,248,0.16),transparent_60%)] opacity-0 transition-opacity group-hover:opacity-100" />
-
-                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-black/20">
-                    {imageUrl ? (
-                      <img
-                        src={imageUrl}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-full w-full object-cover opacity-95 transition duration-500 group-hover:scale-[1.04] group-hover:opacity-100"
-                      />
-                    ) : null}
-                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,0.78),transparent_55%)]" />
-                    <div className="absolute left-4 top-4">
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-xs font-black text-white/90">
-                        <span className="text-white/70">#{idx + 1}</span>
-                        <span className="h-1 w-1 rounded-full bg-white/30" />
-                        <span>{t('leaderboard_votes')} {likes}</span>
-                      </div>
-                    </div>
-                    <div className="absolute inset-x-4 bottom-4">
-                      <div className="truncate text-[15px] font-semibold text-white">{title}</div>
-                      <div className="mt-1 flex items-center justify-between gap-3 text-xs text-white/65">
-                        <div className="truncate">
-                          {userName ? `${userName} • ` : ''}
-                          {partsCount} {t('landing_parts_unit')}
-                        </div>
-                        <div className="shrink-0">
-                          {t('leaderboard_views')} {views}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="relative grid gap-3 p-4">
-                    <div className="grid grid-cols-2 gap-2">
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => onVote(row)}
-                        disabled={busy || likedByMe}
-                        className={`inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          likedByMe
-                            ? 'border-white/10 bg-black/20 text-white/90'
-                            : 'border-sky-300/25 bg-sky-400 text-zinc-950 hover:bg-sky-300'
-                        }`}
-                      >
-                        <span>👍</span>
-                        <span>{likedByMe ? t('leaderboard_vote_done') : t('leaderboard_like')}</span>
-                      </motion.button>
-
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => onToggleFavorite(row)}
-                        disabled={busy}
-                        className={`inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          favoritedByMe
-                            ? 'border-rose-300/25 bg-rose-400 text-zinc-950 hover:bg-rose-300'
-                            : 'border-white/10 bg-black/20 text-white/90 hover:bg-black/35'
-                        }`}
-                      >
-                        <span>❤️</span>
-                        <span>
-                          {favoritedByMe ? t('leaderboard_favorited') : t('leaderboard_favorite')}
-                        </span>
-                      </motion.button>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 text-xs text-white/60">
-                      <div className="flex items-center gap-3">
-                        <span>
-                          {t('leaderboard_votes')} {likes}
-                        </span>
-                        <span>
-                          {t('leaderboard_favorites')} {favs}
-                        </span>
-                      </div>
-                      <Link
-                        to={`/builds/${encodeURIComponent(id)}`}
-                        className="rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-black/25"
-                      >
-                        {t('leaderboard_view_detail')}
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                    return (
+                      <tr key={id || idx} className="border-t border-white/10 hover:bg-white/5">
+                        <td className="px-4 py-3">
+                          <div className={`inline-flex min-w-[44px] items-center justify-center rounded-xl border px-2 py-1 text-xs font-black ${posTone}`}>
+                            {pos}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-16 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                              {imageUrl ? <img src={imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" /> : null}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-white/90">{title}</div>
+                              <div className="mt-0.5 truncate text-xs text-white/55">{partsCount} {t('landing_parts_unit')}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-white/80">{userName || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-white/70">{formatDate(createdAt)}</td>
+                        <td className="px-4 py-3 text-right text-sm font-semibold text-white/85">{likes}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => onVote(row)}
+                              disabled={busy || likedByMe}
+                              className={`rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                likedByMe ? 'border-white/10 bg-white/5 text-white/80' : 'border-sky-300/25 bg-sky-400 text-zinc-950 hover:bg-sky-300'
+                              }`}
+                            >
+                              {likedByMe ? t('leaderboard_vote_done') : t('leaderboard_like')}
+                            </motion.button>
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => onToggleFavorite(row)}
+                              disabled={busy}
+                              className={`rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                favoritedByMe ? 'border-rose-300/25 bg-rose-400 text-zinc-950 hover:bg-rose-300' : 'border-white/10 bg-black/20 text-white/85 hover:bg-black/30'
+                              }`}
+                            >
+                              {favoritedByMe ? t('leaderboard_favorited') : t('leaderboard_favorite')}
+                            </motion.button>
+                            <Link
+                              to={`/builds/${encodeURIComponent(id)}`}
+                              className="rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-black/25"
+                            >
+                              {t('leaderboard_view_detail')}
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="mt-6 text-sm text-zinc-500">{t('builds_coming')}</div>

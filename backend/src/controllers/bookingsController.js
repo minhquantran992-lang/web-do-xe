@@ -8,6 +8,7 @@ const User = require('../models/User');
 const VendorReview = require('../models/VendorReview');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendMail } = require('../services/mailer');
+const { createNotification, notifyFollowers } = require('../services/notifications');
 
 const getFrontendUrl = () => String(process.env.FRONTEND_URL || 'http://localhost:5173').trim().replace(/\/+$/, '');
 const getBackendUrl = () =>
@@ -22,6 +23,18 @@ const escapeHtml = (v) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+const normalizeGender = (value) => {
+  const k = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '');
+  if (!k) return '';
+  if (k === 'male' || k === 'nam') return 'male';
+  if (k === 'female' || k === 'nu') return 'female';
+  return '';
+};
 
 const parseBookingReviewToken = (token) => {
   const t = String(token || '').trim();
@@ -417,7 +430,7 @@ const createBooking = asyncHandler(async (req, res) => {
   const customerName = String(req.body?.customerName || req.body?.name || '').trim();
   const customerPhone = String(req.body?.customerPhone || req.body?.phone || '').trim();
   const customerCity = String(req.body?.customerCity || req.body?.city || '').trim();
-  const customerGender = String(req.body?.customerGender || req.body?.gender || '').trim();
+  const customerGender = normalizeGender(req.body?.customerGender || req.body?.gender);
   const customerCountry = String(req.body?.customerCountry || req.body?.country || '').trim();
   if (customerName) snapshot.customerName = customerName;
   if (customerPhone) snapshot.customerPhone = customerPhone;
@@ -435,6 +448,27 @@ const createBooking = asyncHandler(async (req, res) => {
     expiresAt,
     snapshot
   });
+
+  try {
+    const warningList = Array.isArray(snapshot?.legalWarnings) ? snapshot.legalWarnings.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    if (warningList.length) {
+      const title = String(snapshot?.buildName || snapshot?.carName || '').trim() || buildId;
+      await createNotification({
+        userId,
+        type: 'LEGAL_RISK',
+        content: `Build của bạn có cảnh báo pháp lý: ${title}`,
+        meta: { itemType: 'build', itemId: buildId, warnings: warningList.slice(0, 6) }
+      });
+      await notifyFollowers({
+        itemType: 'build',
+        itemId: buildId,
+        type: 'LEGAL_RISK',
+        content: `Build bạn theo dõi có cảnh báo pháp lý: ${title}`,
+        meta: { itemType: 'build', itemId: buildId, warnings: warningList.slice(0, 6) },
+        excludeUserIds: [userId]
+      });
+    }
+  } catch {}
 
   try {
     const email = String(vendor?.email || '').trim();
@@ -552,11 +586,194 @@ const getMyBooking = asyncHandler(async (req, res) => {
   res.json({ item: { ...item, shopId: undefined, shop } });
 });
 
+const listMyBookings = asyncHandler(async (req, res) => {
+  const userId = String(req.user?.id || '');
+  if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+
+  const statusRaw = String(req.query?.status || '').trim().toLowerCase();
+  const status = ['pending', 'quoted', 'accepted', 'in_progress', 'completed', 'rejected', 'cancelled', 'expired'].includes(statusRaw)
+    ? statusRaw
+    : '';
+  const q = { userId, ...(status ? { status } : {}) };
+
+  const items = await Booking.find(q)
+    .sort({ createdAt: -1 })
+    .populate('shopId', 'shopName address email phone logo coverImage')
+    .lean();
+
+  const retentionMs = 7 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - retentionMs;
+  const terminalStatuses = new Set(['completed', 'cancelled', 'rejected', 'expired']);
+  const terminalAt = (b) => {
+    const s = String(b?.status || '').trim().toLowerCase();
+    if (s === 'completed') return b?.handoverAcceptedAt || b?.completedAt || b?.createdAt || null;
+    if (s === 'cancelled') return b?.cancelledAt || b?.createdAt || null;
+    if (s === 'rejected') return b?.rejectedAt || b?.respondedAt || b?.createdAt || null;
+    if (s === 'expired') return b?.expiredAt || b?.expiresAt || b?.createdAt || null;
+    return b?.createdAt || null;
+  };
+
+  const visible = (Array.isArray(items) ? items : []).filter((b) => {
+    const s = String(b?.status || '').trim().toLowerCase();
+    if (!terminalStatuses.has(s)) return true;
+    const t = terminalAt(b);
+    const ms = t ? new Date(t).getTime() : 0;
+    return Number.isFinite(ms) && ms >= cutoff;
+  });
+
+  res.json({
+    items: visible.map((b) => ({
+      _id: b._id,
+      buildId: b.buildId,
+      timeSlot: b.timeSlot,
+      status: b.status,
+      createdAt: b.createdAt,
+      expiresAt: b.expiresAt,
+      respondedAt: b.respondedAt || null,
+      quotedPrice: typeof b.quotedPrice === 'number' ? b.quotedPrice : null,
+      quoteNote: String(b.quoteNote || ''),
+      quotedAt: b.quotedAt || null,
+      confirmedAt: b.confirmedAt || null,
+      rejectedAt: b.rejectedAt || null,
+      rejectedReason: String(b.rejectedReason || ''),
+      cancelledAt: b.cancelledAt || null,
+      cancelReason: String(b.cancelReason || ''),
+      startedAt: b.startedAt || null,
+      completedAt: b.completedAt || null,
+      handoverAcceptedAt: b.handoverAcceptedAt || null,
+      snapshot: b.snapshot || null,
+      shop: b.shopId
+        ? {
+            _id: b.shopId._id,
+            shopName: b.shopId.shopName || '',
+            address: b.shopId.address || '',
+            email: b.shopId.email || '',
+            phone: b.shopId.phone || '',
+            logo: b.shopId.logo || '',
+            coverImage: b.shopId.coverImage || ''
+          }
+        : null
+    }))
+  });
+});
+
+const confirmMyBooking = asyncHandler(async (req, res) => {
+  const userId = String(req.user?.id || '');
+  const id = String(req.params?.id || '').trim();
+  if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
+
+  const now = new Date();
+  const booking = await Booking.findOne({ _id: id, userId }).lean();
+  if (!booking) return res.status(404).json({ error: 'NOT_FOUND' });
+
+  const curr = String(booking.status || '').trim().toLowerCase();
+  if (curr !== 'quoted') return res.status(409).json({ error: 'NOT_QUOTED' });
+
+  await Booking.updateOne(
+    { _id: id },
+    { $set: { status: 'accepted', confirmedAt: now, cancelledAt: null, cancelReason: '' } }
+  );
+  const updated = await Booking.findById(id).lean();
+
+  try {
+    const [vendor, user] = await Promise.all([
+      booking?.shopId ? Vendor.findById(booking.shopId).select('userId shopName').lean() : Promise.resolve(null),
+      User.findById(userId).select('name email').lean()
+    ]);
+
+    const buildId = String(updated?.buildId || booking?.buildId || '').trim();
+    const shopName = String(vendor?.shopName || '').trim();
+    const title = String(updated?.snapshot?.buildName || updated?.snapshot?.carName || '').trim() || buildId;
+    const who = String(user?.name || '').trim() || String(user?.email || '').trim() || 'Khách hàng';
+    const content = `Khách hàng đã xác nhận thi công: ${title}${shopName ? ` • ${shopName}` : ''} • ${who}`;
+    await createNotification({
+      userId: String(vendor?.userId || ''),
+      type: 'BOOKING_CONFIRMED',
+      content,
+      meta: { bookingId: String(updated?._id || id), buildId, shopId: String(booking?.shopId || ''), shopName }
+    });
+  } catch {}
+
+  res.json({ item: updated });
+});
+
+const rejectMyBooking = asyncHandler(async (req, res) => {
+  const userId = String(req.user?.id || '');
+  const id = String(req.params?.id || '').trim();
+  if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
+
+  const now = new Date();
+  const booking = await Booking.findOne({ _id: id, userId }).lean();
+  if (!booking) return res.status(404).json({ error: 'NOT_FOUND' });
+
+  const curr = String(booking.status || '').trim().toLowerCase();
+  if (curr !== 'quoted') return res.status(409).json({ error: 'NOT_QUOTED' });
+
+  const reasonRaw = String(req.body?.reason || req.body?.cancelReason || '').trim();
+  const reason = reasonRaw.length > 500 ? reasonRaw.slice(0, 500) : reasonRaw;
+
+  await Booking.updateOne(
+    { _id: id },
+    { $set: { status: 'cancelled', cancelledAt: now, cancelReason: reason, confirmedAt: null } }
+  );
+  const updated = await Booking.findById(id).lean();
+
+  try {
+    const [vendor, user] = await Promise.all([
+      booking?.shopId ? Vendor.findById(booking.shopId).select('userId shopName').lean() : Promise.resolve(null),
+      User.findById(userId).select('name email').lean()
+    ]);
+
+    const buildId = String(updated?.buildId || booking?.buildId || '').trim();
+    const shopName = String(vendor?.shopName || '').trim();
+    const title = String(updated?.snapshot?.buildName || updated?.snapshot?.carName || '').trim() || buildId;
+    const who = String(user?.name || '').trim() || String(user?.email || '').trim() || 'Khách hàng';
+    const content = reason
+      ? `Khách hàng đã từ chối thi công: ${title}${shopName ? ` • ${shopName}` : ''} • ${who} • Lý do: ${reason}`
+      : `Khách hàng đã từ chối thi công: ${title}${shopName ? ` • ${shopName}` : ''} • ${who}`;
+    await createNotification({
+      userId: String(vendor?.userId || ''),
+      type: 'BOOKING_CANCELLED',
+      content,
+      meta: { bookingId: String(updated?._id || id), buildId, shopId: String(booking?.shopId || ''), shopName, reason }
+    });
+  } catch {}
+
+  res.json({ item: updated });
+});
+
+const finishMyBooking = asyncHandler(async (req, res) => {
+  const userId = String(req.user?.id || '');
+  const id = String(req.params?.id || '').trim();
+  if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
+
+  const now = new Date();
+  const booking = await Booking.findOne({ _id: id, userId }).lean();
+  if (!booking) return res.status(404).json({ error: 'NOT_FOUND' });
+
+  const curr = String(booking.status || '').trim().toLowerCase();
+  if (curr !== 'completed') return res.status(409).json({ error: 'BOOKING_NOT_COMPLETED' });
+
+  if (booking.handoverAcceptedAt) {
+    const updated = await Booking.findById(id).lean();
+    return res.json({ item: updated || booking });
+  }
+
+  await Booking.updateOne({ _id: id }, { $set: { handoverAcceptedAt: now } });
+  const updated = await Booking.findById(id).lean();
+  res.json({ item: updated });
+});
+
 const listVendorBookings = asyncHandler(async (req, res) => {
   const vendorId = String(req.vendor?._id || '');
   if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
   const statusRaw = String(req.query?.status || '').trim().toLowerCase();
-  const status = ['pending', 'accepted', 'in_progress', 'completed', 'rejected', 'expired'].includes(statusRaw) ? statusRaw : '';
+  const status = ['pending', 'quoted', 'accepted', 'in_progress', 'completed', 'rejected', 'cancelled', 'expired'].includes(statusRaw)
+    ? statusRaw
+    : '';
   const q = { shopId: vendorId, ...(status ? { status } : {}) };
   const items = await Booking.find(q)
     .sort({ createdAt: -1 })
@@ -572,8 +789,14 @@ const listVendorBookings = asyncHandler(async (req, res) => {
       createdAt: b.createdAt,
       expiresAt: b.expiresAt,
       respondedAt: b.respondedAt || null,
+      quotedPrice: typeof b.quotedPrice === 'number' ? b.quotedPrice : null,
+      quoteNote: String(b.quoteNote || ''),
+      quotedAt: b.quotedAt || null,
+      confirmedAt: b.confirmedAt || null,
       rejectedAt: b.rejectedAt || null,
       rejectedReason: String(b.rejectedReason || ''),
+      cancelledAt: b.cancelledAt || null,
+      cancelReason: String(b.cancelReason || ''),
       startedAt: b.startedAt || null,
       completedAt: b.completedAt || null,
       snapshot: b.snapshot || null,
@@ -602,17 +825,24 @@ const getVendorBooking = asyncHandler(async (req, res) => {
       createdAt: b.createdAt,
       expiresAt: b.expiresAt,
       respondedAt: b.respondedAt || null,
+      quotedPrice: typeof b.quotedPrice === 'number' ? b.quotedPrice : null,
+      quoteNote: String(b.quoteNote || ''),
+      quotedAt: b.quotedAt || null,
+      confirmedAt: b.confirmedAt || null,
       rejectedAt: b.rejectedAt || null,
       rejectedReason: String(b.rejectedReason || ''),
+      cancelledAt: b.cancelledAt || null,
+      cancelReason: String(b.cancelReason || ''),
       startedAt: b.startedAt || null,
       completedAt: b.completedAt || null,
+      handoverAcceptedAt: b.handoverAcceptedAt || null,
       snapshot: b.snapshot || null,
       user: b.userId ? { _id: b.userId._id, name: b.userId.name || '', email: b.userId.email || '' } : null
     }
   });
 });
 
-const buildAcceptedEmail = ({ customerName, shopName, shopAddress, timeSlot, snapshot, bookingId }) => {
+const buildAcceptedEmail = ({ customerName, shopName, shopAddress, timeSlot, snapshot, bookingId, quotedPrice, quoteNote }) => {
   const name = String(customerName || '').trim() || 'Khách hàng';
   const sName = String(shopName || '').trim() || 'Cửa hàng đối tác';
   const addr = String(shopAddress || '').trim();
@@ -626,7 +856,9 @@ const buildAcceptedEmail = ({ customerName, shopName, shopAddress, timeSlot, sna
     })
     .filter(Boolean)
     .join('\n');
-  const total = formatVnd(snapshot?.totalPrice);
+  const hasQuote = typeof quotedPrice === 'number' && Number.isFinite(quotedPrice) && quotedPrice >= 0;
+  const total = formatVnd(hasQuote ? quotedPrice : snapshot?.totalPrice);
+  const totalLabel = hasQuote ? 'Báo giá' : 'Tổng dự kiến';
   const normalizeLegalWarningText = (raw) => {
     const s = typeof raw === 'string' ? raw.trim() : String(raw || '').trim();
     if (!s) return '';
@@ -660,7 +892,8 @@ const buildAcceptedEmail = ({ customerName, shopName, shopAddress, timeSlot, sna
     '',
     `Cấu hình: ${buildLabel}`,
     items ? `Phụ kiện đã chọn:\n${items}` : 'Phụ kiện đã chọn: (không có)',
-    `Tổng dự kiến: ${total}`,
+    `${totalLabel}: ${total}`,
+    quoteNote ? `Ghi chú từ shop: ${quoteNote}` : '',
     warnings ? `\nCảnh báo pháp lý:\n- ${warnings}` : '',
     '',
     `Xem chi tiết & theo dõi trạng thái: ${bookingUrl}`,
@@ -724,9 +957,16 @@ const buildAcceptedEmail = ({ customerName, shopName, shopAddress, timeSlot, sna
                     ? `<ul style="margin:12px 0 0 18px;padding:0">${htmlParts}</ul>`
                     : `<div style="margin-top:10px;color:rgba(148,163,184,0.9)">Không có phụ kiện nào được chọn.</div>`
                 }
-                <div style="margin-top:12px;color:#fff;font-weight:750">Tổng dự kiến: <span style="color:#e2e8f0">${escapeHtml(
+                <div style="margin-top:12px;color:#fff;font-weight:750">${escapeHtml(totalLabel)}: <span style="color:#e2e8f0">${escapeHtml(
                   total
                 )}</span></div>
+                ${
+                  quoteNote
+                    ? `<div style="margin-top:8px;color:rgba(226,232,240,0.92);font-weight:650">Ghi chú từ shop: <span style="color:rgba(148,163,184,0.95)">${escapeHtml(
+                        String(quoteNote || '').trim()
+                      )}</span></div>`
+                    : ''
+                }
                 ${
                   htmlWarnings
                     ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08)">
@@ -764,6 +1004,11 @@ const acceptBooking = asyncHandler(async (req, res) => {
   const nextDate = parseDate(req.body?.timeSlot || req.body?.slot || req.body?.time);
   if (nextDate && nextDate.getTime() < now.getTime()) return res.status(400).json({ error: 'TIME_IN_PAST' });
 
+  const quotedPriceRaw = req.body?.quotedPrice ?? req.body?.price ?? req.body?.quotePrice;
+  const quotedPrice = quotedPriceRaw === undefined || quotedPriceRaw === null || quotedPriceRaw === '' ? null : Number(quotedPriceRaw);
+  if (quotedPrice !== null && (!Number.isFinite(quotedPrice) || quotedPrice < 0)) return res.status(400).json({ error: 'INVALID_QUOTED_PRICE' });
+  const quoteNote = String(req.body?.quoteNote || req.body?.note || '').trim();
+
   const booking = await Booking.findOne({ _id: id, shopId: vendorId }).lean();
   if (!booking) return res.status(404).json({ error: 'NOT_FOUND' });
 
@@ -773,8 +1018,18 @@ const acceptBooking = asyncHandler(async (req, res) => {
     return res.status(409).json({ error: 'EXPIRED' });
   }
 
-  const patch = { status: 'accepted', respondedAt: now };
+  const patch = { status: quotedPrice !== null ? 'quoted' : 'accepted', respondedAt: now };
   if (nextDate) patch.timeSlot = nextDate;
+  if (quotedPrice !== null) {
+    patch.quotedPrice = quotedPrice;
+    patch.quotedAt = now;
+    patch.quoteNote = quoteNote;
+    patch.confirmedAt = null;
+    patch.cancelledAt = null;
+    patch.cancelReason = '';
+  } else if (quoteNote) {
+    patch.quoteNote = quoteNote;
+  }
   await Booking.updateOne({ _id: id }, { $set: patch });
   const updated = await Booking.findById(id).lean();
 
@@ -785,16 +1040,117 @@ const acceptBooking = asyncHandler(async (req, res) => {
 
   const userEmail = String(user?.email || '').trim();
   if (userEmail) {
-    const mail = buildAcceptedEmail({
-      customerName: user?.name || userEmail,
-      shopName: vendor?.shopName || '',
-      shopAddress: vendor?.address || '',
-      timeSlot: updated?.timeSlot,
-      snapshot: updated?.snapshot || {},
-      bookingId: String(updated?._id || '')
-    });
-    await sendMail({ to: userEmail, subject: mail.subject, text: mail.text, html: mail.html });
+    if (String(updated?.status || '').trim().toLowerCase() === 'quoted') {
+      const bookingId = String(updated?._id || '');
+      const bookingUrl = `${getFrontendUrl()}/booking/${encodeURIComponent(bookingId)}`;
+      const shopName = String(vendor?.shopName || '').trim();
+      const timeLabel =
+        formatDateTimeVi(updated?.timeSlot) ||
+        (updated?.timeSlot instanceof Date ? updated.timeSlot.toISOString() : String(updated?.timeSlot || ''));
+      const buildLabel =
+        String(updated?.snapshot?.buildName || updated?.snapshot?.carName || '').trim() || String(updated?.buildId || '');
+      const quote = typeof updated?.quotedPrice === 'number' && Number.isFinite(updated.quotedPrice) ? formatVnd(updated.quotedPrice) : '—';
+      const note = String(updated?.quoteNote || '').trim();
+      const subject = `eloride • Báo giá lịch hẹn${shopName ? ` • ${shopName}` : ''}`;
+      const text = [
+        `Chào ${String(user?.name || userEmail).trim() || userEmail},`,
+        '',
+        'Shop đã gửi báo giá cho lịch hẹn của bạn.',
+        '',
+        bookingId ? `Mã đặt lịch: ${bookingId}` : '',
+        timeLabel ? `Thời gian: ${timeLabel}` : '',
+        shopName ? `Cửa hàng: ${shopName}` : '',
+        buildLabel ? `Cấu hình: ${buildLabel}` : '',
+        `Báo giá: ${quote}`,
+        note ? `Ghi chú từ shop: ${note}` : '',
+        '',
+        `Vui lòng xác nhận hoặc từ chối thi công tại đây: ${bookingUrl}`,
+        '',
+        'Cảm ơn bạn đã sử dụng eloride.'
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const html = `
+        <div style="margin:0;padding:0;background:#0b1220;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">
+          <div style="padding:24px 16px">
+            <div style="max-width:720px;margin:0 auto;background:#0f172a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden">
+              <div style="padding:30px 30px 22px;border-bottom:1px solid rgba(255,255,255,0.08)">
+                <div style="font-size:12px;color:rgba(148,163,184,0.95);font-weight:800;letter-spacing:0.14em;text-transform:uppercase">eloride</div>
+                <div style="margin-top:10px;font-size:20px;font-weight:900;color:#fff;letter-spacing:-0.01em">Shop đã gửi báo giá</div>
+                <div style="margin-top:6px;color:rgba(148,163,184,0.9);font-size:13px;line-height:1.6">
+                  Chào ${escapeHtml(String(user?.name || userEmail).trim() || userEmail)}, vui lòng xác nhận hoặc từ chối thi công trên trang theo dõi.
+                </div>
+              </div>
+              <div style="padding:22px 30px 30px">
+                <div style="display:grid;grid-template-columns:1fr;gap:14px">
+                  <div style="padding:14px 14px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:rgba(2,6,23,0.35)">
+                    <div style="font-size:12px;color:rgba(148,163,184,0.9);font-weight:750;letter-spacing:0.06em;text-transform:uppercase">Thông tin</div>
+                    ${bookingId ? `<div style="margin-top:10px;color:#fff;font-weight:700">Mã đặt lịch: <span style="color:#e2e8f0">${escapeHtml(bookingId)}</span></div>` : ''}
+                    ${timeLabel ? `<div style="margin-top:6px;color:#fff;font-weight:650">Thời gian: <span style="color:#e2e8f0">${escapeHtml(timeLabel)}</span></div>` : ''}
+                    ${shopName ? `<div style="margin-top:6px;color:#fff;font-weight:650">Cửa hàng: <span style="color:#e2e8f0">${escapeHtml(shopName)}</span></div>` : ''}
+                    ${buildLabel ? `<div style="margin-top:6px;color:#fff;font-weight:650">Cấu hình: <span style="color:#e2e8f0">${escapeHtml(buildLabel)}</span></div>` : ''}
+                    <div style="margin-top:10px;color:#fff;font-weight:900">Báo giá: <span style="color:#e2e8f0">${escapeHtml(quote)}</span></div>
+                    ${note ? `<div style="margin-top:8px;color:rgba(226,232,240,0.92);font-weight:650">Ghi chú từ shop: <span style="color:rgba(148,163,184,0.95)">${escapeHtml(note)}</span></div>` : ''}
+                  </div>
+                </div>
+                <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
+                  <a href="${bookingUrl}" style="display:inline-block;text-decoration:none;background:linear-gradient(90deg,#38bdf8,#22d3ee);color:#02131a;font-weight:900;font-size:13px;padding:12px 14px;border-radius:12px">Mở trang theo dõi</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      await sendMail({ to: userEmail, subject, text, html });
+    } else {
+      const mail = buildAcceptedEmail({
+        customerName: user?.name || userEmail,
+        shopName: vendor?.shopName || '',
+        shopAddress: vendor?.address || '',
+        timeSlot: updated?.timeSlot,
+        snapshot: updated?.snapshot || {},
+        bookingId: String(updated?._id || ''),
+        quotedPrice: updated?.quotedPrice ?? null,
+        quoteNote: String(updated?.quoteNote || '')
+      });
+      await sendMail({ to: userEmail, subject: mail.subject, text: mail.text, html: mail.html });
+    }
   }
+
+  try {
+    const buildId = String(updated?.buildId || booking?.buildId || '').trim();
+    const shopName = String(vendor?.shopName || '').trim();
+    const when = updated?.timeSlot instanceof Date ? updated.timeSlot.toISOString() : '';
+    const title = String(updated?.snapshot?.buildName || updated?.snapshot?.carName || '').trim() || buildId;
+    const quoteText =
+      typeof updated?.quotedPrice === 'number' && Number.isFinite(updated.quotedPrice) && updated.quotedPrice > 0 ? ` • Báo giá: ${formatVnd(updated.quotedPrice)}` : '';
+    const content = quoteText
+      ? `Shop đã gửi báo giá cho lịch hẹn của bạn: ${title}${shopName ? ` • ${shopName}` : ''}${quoteText}`
+      : `Shop đã chấp nhận lịch hẹn của bạn: ${title}${shopName ? ` • ${shopName}` : ''}`;
+    await createNotification({
+      userId: String(booking?.userId || ''),
+      type: 'BOOKING_ACCEPTED',
+      content,
+      meta: {
+        bookingId: String(updated?._id || ''),
+        buildId,
+        shopId: String(vendorId),
+        shopName,
+        timeSlot: when,
+        quotedPrice: updated?.quotedPrice ?? null
+      }
+    });
+    if (buildId && mongoose.isValidObjectId(buildId)) {
+      await notifyFollowers({
+        itemType: 'build',
+        itemId: buildId,
+        type: 'BUILD_ACCEPTED',
+        content: `Build bạn theo dõi đã được shop chấp nhận: ${title}${shopName ? ` • ${shopName}` : ''}`,
+        meta: { bookingId: String(updated?._id || ''), buildId, shopId: String(vendorId), shopName, timeSlot: when },
+        excludeUserIds: [String(booking?.userId || '')]
+      });
+    }
+  } catch {}
 
   res.json({ item: updated });
 });
@@ -835,6 +1191,26 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
         Vendor.findById(vendorId).select('shopName').lean(),
         updated?.userId ? User.findById(updated.userId).select('name email').lean() : Promise.resolve(null)
       ]);
+      try {
+        const uid = String(updated?.userId || '').trim();
+        if (mongoose.isValidObjectId(uid)) {
+          const buildId = String(updated?.buildId || '').trim();
+          const shopName = String(vendor?.shopName || '').trim();
+          const title = String(updated?.snapshot?.buildName || updated?.snapshot?.carName || '').trim() || buildId || String(updated?._id || id);
+          await createNotification({
+            userId: uid,
+            type: 'BOOKING_COMPLETED',
+            content: `Shop đã bàn giao cho khách: ${title}${shopName ? ` • ${shopName}` : ''}`,
+            meta: {
+              bookingId: String(updated?._id || id),
+              buildId: buildId || null,
+              shopId: String(vendorId),
+              shopName,
+              completedAt: updated?.completedAt instanceof Date ? updated.completedAt.toISOString() : updated?.completedAt || null
+            }
+          });
+        }
+      } catch {}
       const userEmail = String(user?.email || '').trim();
       if (userEmail) {
         const ratingLinks = {};
@@ -1220,6 +1596,10 @@ const expirePendingBookings = async () => {
 module.exports = {
   createBooking,
   getMyBooking,
+  listMyBookings,
+  confirmMyBooking,
+  rejectMyBooking,
+  finishMyBooking,
   listVendorBookings,
   getVendorBooking,
   acceptBooking,

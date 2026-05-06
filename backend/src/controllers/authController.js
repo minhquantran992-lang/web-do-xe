@@ -9,6 +9,31 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendMail } = require('../services/mailer');
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const isValidEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email) return false;
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at <= 0) return false;
+  if (at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!local || !domain) return false;
+  if (local.length > 64) return false;
+  if (domain.length > 255) return false;
+  if (local.startsWith('.') || local.endsWith('.')) return false;
+  if (local.includes('..')) return false;
+  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/i.test(local)) return false;
+  if (domain.includes('..')) return false;
+  if (!domain.includes('.')) return false;
+  const labels = domain.split('.');
+  if (labels.some((l) => !l || l.length > 63)) return false;
+  if (labels.some((l) => !/^[a-z0-9-]+$/i.test(l))) return false;
+  if (labels.some((l) => l.startsWith('-') || l.endsWith('-'))) return false;
+  const tld = labels[labels.length - 1] || '';
+  if (tld.length < 2 || tld.length > 63) return false;
+  return true;
+};
 const normalizePhone = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -28,14 +53,55 @@ const normalizeGender = (value) => {
   if (!k) return '';
   if (k === 'male' || k === 'nam') return 'male';
   if (k === 'female' || k === 'nu') return 'female';
-  if (k === 'other' || k === 'khac') return 'other';
   return '';
+};
+
+const normalizeForBlockedText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
+
+const isInappropriateText = (value) => {
+  const s = normalizeForBlockedText(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const profanity = [
+    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
+    /\b(dcm|dm)\b/i,
+    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
+    /(chó\s*mày|cho\s*may)/i,
+    /(dit|du|lon|cac|cak|buoi)/i
+  ];
+  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  const sensitive = [
+    /\b(porn|xxx|sex|nude)\b/i,
+    /(hiep\s*dam|rape)/i,
+    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
+    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
+    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
+  ];
+  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  return false;
+};
+
+const validateUserName = (value) => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { ok: false, error: 'INVALID_NAME' };
+  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'INVALID_NAME' };
+  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'INVALID_NAME' };
+  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'INVALID_NAME' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'NAME_INAPPROPRIATE' };
+  return { ok: true, value: raw };
 };
 
 const parseIdentifier = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return { kind: '', email: '', phone: '' };
-  if (raw.includes('@')) return { kind: 'email', email: normalizeEmail(raw), phone: '' };
+  if (raw.includes('@')) return { kind: 'email', email: isValidEmail(raw) ? normalizeEmail(raw) : '', phone: '' };
   return { kind: 'phone', email: '', phone: normalizePhone(raw) };
 };
 
@@ -334,19 +400,31 @@ const upsertOAuthUser = async ({ provider, providerId, email, name, avatar }) =>
     err.statusCode = 400;
     throw err;
   }
+  if (!isValidEmail(normalizedEmail)) {
+    const err = new Error('INVALID_EMAIL');
+    err.statusCode = 400;
+    throw err;
+  }
 
   const byEmail = await User.findOne({ email: normalizedEmail }).select('+password name email provider providerId avatar createdAt role');
   if (byEmail) {
     const existingPid = String(byEmail.providerId || '').trim();
     const existingProvider = String(byEmail.provider || '').trim();
 
-    if (existingPid && (existingProvider !== p || existingPid !== pid)) {
+    if (existingPid && existingProvider && existingProvider !== 'local' && (existingProvider !== p || existingPid !== pid)) {
       const err = new Error('EMAIL_ALREADY_LINKED');
       err.statusCode = 409;
       throw err;
     }
 
-    const patch = { provider: p, providerId: pid };
+    const patch = {};
+    if (!existingProvider || existingProvider === p) {
+      patch.provider = p;
+      patch.providerId = pid;
+    }
+    if (existingProvider === 'local' && existingPid) {
+      patch.providerId = existingPid;
+    }
     if (safeName && !String(byEmail.name || '').trim()) patch.name = safeName;
     if (safeAvatar && !String(byEmail.avatar || '').trim()) patch.avatar = safeAvatar;
     const adminEmails = parseAdminEmails();
@@ -357,7 +435,7 @@ const upsertOAuthUser = async ({ provider, providerId, email, name, avatar }) =>
       patch.role = 'ADMIN';
     }
 
-    await User.updateOne({ _id: byEmail._id }, { $set: patch });
+    if (Object.keys(patch).length) await User.updateOne({ _id: byEmail._id }, { $set: patch });
     return User.findById(byEmail._id).select('name email provider providerId avatar createdAt role');
   }
 
@@ -386,6 +464,7 @@ const register = asyncHandler(async (req, res) => {
   if (isVendor) {
     const email = normalizeEmail(req.body?.email);
     if (!email) return res.status(400).json({ error: 'MISSING_FIELDS' });
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
     const existing = await User.findOne({ email }).lean();
     if (existing) return res.status(409).json({ error: 'EMAIL_EXISTS' });
     const shopName = String(req.body?.shopName || '').trim();
@@ -430,6 +509,7 @@ const register = asyncHandler(async (req, res) => {
   const dob = dobRaw ? new Date(dobRaw) : null;
   const gender = normalizeGender(req.body?.gender);
   const country = String(req.body?.country || '').trim();
+  if (!gender || !country) return res.status(400).json({ error: 'MISSING_FIELDS' });
 
   const now = new Date();
   const code = createOtpCode();
@@ -458,9 +538,49 @@ const register = asyncHandler(async (req, res) => {
 
   let user = null;
   if (id.kind === 'email') {
-    const existing = await User.findOne({ email: id.email }).select('_id email emailVerified registrationPending provider');
+    const existing = await User.findOne({ email: id.email }).select(
+      '_id email emailVerified registrationPending provider role name avatar createdAt +password +passwordHash'
+    );
     if (existing && String(existing.provider || '') !== 'local') return res.status(409).json({ error: 'EMAIL_ALREADY_LINKED' });
-    if (existing) return res.status(409).json({ error: 'EMAIL_EXISTS' });
+    if (existing) {
+      if (existing.registrationPending && !existing.emailVerified) {
+        await User.updateOne(
+          { _id: existing._id },
+          {
+            $set: {
+              ...patch,
+              password: passwordHash,
+              passwordHash
+            }
+          }
+        );
+        const mail = buildOtpEmail({
+          subject: 'eloride • Mã xác thực đăng ký',
+          heading: 'Xác thực đăng ký',
+          message: 'Chúng tôi vừa nhận được yêu cầu tạo tài khoản eloride cho',
+          code,
+          expiresMinutes: 5,
+          recipient: maskEmail(id.email)
+        });
+        await sendMail({ to: id.email, subject: mail.subject, text: mail.text, html: mail.html });
+        return res.status(200).json(
+          noSmtp || echo ? { ok: true, existing: true, requiresOtp: true, channel: 'email', code } : { ok: true, existing: true, requiresOtp: true, channel: 'email' }
+        );
+      }
+
+      let storedHash = String(existing.password || '').trim();
+      if (!storedHash) {
+        const legacy = String(existing.passwordHash || '').trim();
+        if (legacy) storedHash = legacy;
+      }
+      if (!storedHash) return res.status(409).json({ error: 'EMAIL_EXISTS' });
+
+      const ok = await bcrypt.compare(password, storedHash);
+      if (!ok) return res.status(409).json({ error: 'EMAIL_EXISTS' });
+
+      const token = signToken({ userId: existing._id, email: existing.email, role: existing.role });
+      return res.status(200).json({ ok: true, existing: true, token, user: toUserJson(existing) });
+    }
     {
       const adminEmails = parseAdminEmails();
       const role = adminEmails.has(id.email) ? 'ADMIN' : 'USER';
@@ -626,12 +746,54 @@ const resendOtp = asyncHandler(async (req, res) => {
 });
 
 const beginOAuthOtpLogin = async ({ provider, providerId, email, name, avatar }) => {
+  const p = String(provider || '').trim();
+  const pid = String(providerId || '').trim();
+  const inputEmail = normalizeEmail(email);
+
+  const preExisting =
+    (p && pid) || inputEmail
+      ? await User.findOne({
+          $or: [
+            p && pid ? { provider: p, providerId: pid } : null,
+            inputEmail ? { email: inputEmail } : null
+          ].filter(Boolean)
+        })
+          .select('_id provider registrationPending emailVerified')
+          .lean()
+      : null;
+
   const user = await upsertOAuthUser({ provider, providerId, email, name, avatar });
   const normalizedEmail = normalizeEmail(user?.email);
   if (!normalizedEmail) {
     const err = new Error('MISSING_EMAIL');
     err.statusCode = 400;
     throw err;
+  }
+
+  const canSkipOtp = Boolean(
+    preExisting &&
+      !(
+        String(preExisting?.provider || '') === 'local' &&
+        Boolean(preExisting?.registrationPending) &&
+        !Boolean(preExisting?.emailVerified)
+      )
+  );
+  if (canSkipOtp) {
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: { emailVerified: true, registrationPending: false },
+        $unset: {
+          oauthLoginTicketHash: '',
+          oauthLoginTicketExpires: '',
+          oauthLoginOtpHash: '',
+          oauthLoginOtpExpires: '',
+          oauthLoginOtpLastSentAt: ''
+        }
+      }
+    );
+    const token = signToken({ userId: user._id, email: user.email, role: user.role });
+    return { token };
   }
 
   const buildLoginOtpEmail = ({ code }) => {
@@ -748,6 +910,7 @@ const login = asyncHandler(async (req, res) => {
   const password = String(req.body?.password || '');
 
   if (!email || !password) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
 
   let user = await User.findOne({ email }).select('+password +passwordHash name email provider providerId avatar createdAt role');
   if (!user) {
@@ -838,6 +1001,7 @@ const changePassword = asyncHandler(async (req, res) => {
 const requestPasswordReset = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
   const user = await User.findOne({ email }).select('_id');
   if (!user) {
     console.log(`[auth] request-reset ignored: email not found (${email})`);
@@ -897,6 +1061,7 @@ const resetPasswordByCode = asyncHandler(async (req, res) => {
   const code = String(req.body?.code || '');
   const newPassword = String(req.body?.newPassword || '');
   if (!email || !code || !newPassword) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
   if (newPassword.length < 6) return res.status(400).json({ error: 'WEAK_PASSWORD' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
@@ -918,6 +1083,7 @@ const verifyResetCode = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   const code = String(req.body?.code || '');
   if (!email || !code) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
   const user = await User.findOne({
@@ -932,6 +1098,7 @@ const verifyResetCode = asyncHandler(async (req, res) => {
 const requestVerifyEmail = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
   const user = await User.findOne({ email }).select('_id emailVerified');
   if (!user) return res.json({ ok: true });
   if (user.emailVerified) return res.json({ ok: true });
@@ -958,6 +1125,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   const code = String(req.body?.code || '');
   if (!email || !code) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
   const user = await User.findOne({
@@ -1007,7 +1175,11 @@ const updateMe = asyncHandler(async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
 
   const patch = {};
-  if (req.body?.name != null) patch.name = String(req.body.name || '').trim().slice(0, 80);
+  if (req.body?.name != null) {
+    const checked = validateUserName(req.body.name);
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
+    patch.name = checked.value;
+  }
   if (req.body?.phone != null) patch.phone = String(req.body.phone || '').trim().slice(0, 30);
   if (req.body?.gender != null) patch.gender = normalizeGender(req.body.gender);
   if (req.body?.country != null) patch.country = String(req.body.country || '').trim().slice(0, 40);

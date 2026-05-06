@@ -1,5 +1,5 @@
 const express = require('express');
-const { authRequired, requireVendor } = require('../middleware/auth');
+const { authRequired, requireVendor, requireVendorApproved } = require('../middleware/auth');
 const {
   getMyShop,
   upsertMyShop,
@@ -13,6 +13,7 @@ const {
   updateMyShopPost,
   deleteMyShopPost
 } = require('../controllers/vendorController');
+const { getVendorBuildDetail } = require('../controllers/vendorBuildsController');
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.post('/shop/accepting-bookings', requireVendor, setMyAcceptingBookings);
 router.post('/shop/closed-today', requireVendor, setMyClosedToday);
 router.post('/shop/capacity', requireVendor, setMyCapacity);
 router.get('/stats', requireVendor, getMyStats);
+router.get('/builds/:id', requireVendorApproved, getVendorBuildDetail);
 router.get('/reviews', requireVendor, listMyReviews);
 router.get('/posts', requireVendor, listMyShopPosts);
 router.post('/posts', requireVendor, createMyShopPost);

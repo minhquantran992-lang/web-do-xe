@@ -7,6 +7,7 @@ import Header from './Header.jsx';
 import Sidebar from './Sidebar.jsx';
 import Dashboard from './Dashboard.jsx';
 import Requests from './Requests.jsx';
+import OrdersTab from './Orders.jsx';
 import ShopProfile from './Products.jsx';
 import Reviews from './Reviews.jsx';
 import Modal from './Modal.jsx';
@@ -1045,6 +1046,7 @@ const SellerCenter = () => {
   const pageTitle = useMemo(() => {
     if (active === 'overview') return t('seller_page_overview');
     if (active === 'requests') return t('seller_page_requests');
+    if (active === 'orders') return 'Đơn hàng';
     if (active === 'tickets') return 'Khiếu nại';
     if (active === 'profile') return t('shop_profile_title');
     if (active === 'content') return 'Bài viết & Video';
@@ -1118,6 +1120,7 @@ const SellerCenter = () => {
 
           {active === 'overview' ? <Dashboard /> : null}
           {active === 'requests' ? <Requests /> : null}
+          {active === 'orders' ? <OrdersTab /> : null}
           {active === 'tickets' ? <VendorTickets /> : null}
           {active === 'profile' ? <ShopProfile onSaved={(name) => setShopName(String(name || '').trim())} /> : null}
           {active === 'content' ? <ShopContent /> : null}

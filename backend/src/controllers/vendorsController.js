@@ -39,6 +39,33 @@ const escapeHtml = (v) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const isValidEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email) return false;
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at <= 0) return false;
+  if (at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!local || !domain) return false;
+  if (local.length > 64) return false;
+  if (domain.length > 255) return false;
+  if (local.startsWith('.') || local.endsWith('.')) return false;
+  if (local.includes('..')) return false;
+  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/i.test(local)) return false;
+  if (domain.includes('..')) return false;
+  if (!domain.includes('.')) return false;
+  const labels = domain.split('.');
+  if (labels.some((l) => !l || l.length > 63)) return false;
+  if (labels.some((l) => !/^[a-z0-9-]+$/i.test(l))) return false;
+  if (labels.some((l) => l.startsWith('-') || l.endsWith('-'))) return false;
+  const tld = labels[labels.length - 1] || '';
+  if (tld.length < 2 || tld.length > 63) return false;
+  return true;
+};
+
 const signAdminAction = ({ action, applicationId, expiresAt }) => {
   const secret = String(process.env.ADMIN_ACTION_SECRET || process.env.JWT_SECRET || '').trim();
   if (!secret) return '';
@@ -274,7 +301,7 @@ const submitPartnerApplication = asyncHandler(async (req, res) => {
   const representativeName = String(req.body?.representativeName || '').trim();
   const province = String(req.body?.province || '').trim();
   const phone = String(req.body?.phone || '').trim();
-  const email = String(req.body?.email || '').trim();
+  const email = normalizeEmail(req.body?.email);
 
   if (!shopName) return res.status(400).json({ error: 'MISSING_SHOP_NAME' });
   if (!representativeName) return res.status(400).json({ error: 'MISSING_REPRESENTATIVE_NAME' });
@@ -282,8 +309,7 @@ const submitPartnerApplication = asyncHandler(async (req, res) => {
   if (!phone) return res.status(400).json({ error: 'MISSING_PHONE' });
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
 
-  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  if (!emailOk) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
 
   const item = await PartnerApplication.create({ shopName, representativeName, province, phone, email });
 

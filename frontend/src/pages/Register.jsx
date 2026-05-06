@@ -17,7 +17,31 @@ const OTP_LEN = 6;
 const REGISTER_DRAFT_KEY = 'eloride.register_draft_v1';
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
-const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+const isValidEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email) return false;
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at <= 0) return false;
+  if (at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!local || !domain) return false;
+  if (local.length > 64) return false;
+  if (domain.length > 255) return false;
+  if (local.startsWith('.') || local.endsWith('.')) return false;
+  if (local.includes('..')) return false;
+  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/i.test(local)) return false;
+  if (domain.includes('..')) return false;
+  if (!domain.includes('.')) return false;
+  const labels = domain.split('.');
+  if (labels.some((l) => !l || l.length > 63)) return false;
+  if (labels.some((l) => !/^[a-z0-9-]+$/i.test(l))) return false;
+  if (labels.some((l) => l.startsWith('-') || l.endsWith('-'))) return false;
+  const tld = labels[labels.length - 1] || '';
+  if (tld.length < 2 || tld.length > 63) return false;
+  return true;
+};
 const isStrongPassword = (value) => {
   const v = String(value || '');
   if (v.length < 8) return false;
@@ -622,13 +646,20 @@ const Register = () => {
     setLoading(true);
     try {
       const data = await registerOtp({ name: fullName, dob, gender, country, identifier, password });
+      if (data?.token) {
+        setAuth({ token: data.token, user: data.user });
+        sessionStorage.removeItem(REGISTER_DRAFT_KEY);
+        nav(next, { replace: true });
+        return;
+      }
       setOtpChannel(String(data?.channel || ''));
       setOtp(Array.from({ length: OTP_LEN }, () => ''));
       setStep(3);
       setTriedStep3(false);
       window.setTimeout(() => moveOtpFocus(0), 0);
     } catch (err) {
-      setError(err?.message || 'REGISTER_FAILED');
+      const code = String(err?.message || '').trim();
+      setError(code || 'REGISTER_FAILED');
     } finally {
       setLoading(false);
     }
