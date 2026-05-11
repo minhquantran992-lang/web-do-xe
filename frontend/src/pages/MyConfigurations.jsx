@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../services/auth/AuthContext.jsx';
-import { deleteConfiguration, getMyConfigurations } from '../services/api/configurations.js';
+import { deleteConfiguration, getMyConfigurations, setConfigurationPublic } from '../services/api/configurations.js';
 import { useI18n } from '../services/i18n.jsx';
 import CarViewer from '../threejs/CarViewer.jsx';
 import { normalizeVariantKey, resolveBestComboKey } from '../services/combinedModels.js';
@@ -43,6 +43,7 @@ const MyConfigurations = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState('');
+  const [togglingId, setTogglingId] = useState('');
 
   const safeText = (v, fallback = '-') => {
     const s = String(v ?? '').trim();
@@ -379,6 +380,8 @@ const MyConfigurations = () => {
             const colorMeta = colorNameFromHex(colorValue);
             const parts = partsBadges(c?.selectedParts);
             const created = formatDate(c?.createdAt);
+            const isPublic = Boolean(c?.isPublic);
+            const likesCount = Math.max(0, Number(c?.likesCount) || 0);
 
             return (
               <div
@@ -392,6 +395,25 @@ const MyConfigurations = () => {
                     <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-semibold text-white/80">
                       {t('my_builds_badge_saved')}
                     </div>
+                    <div
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                        isPublic ? 'border-emerald-400/20 bg-emerald-500/15 text-emerald-100' : 'border-white/10 bg-black/40 text-white/70'
+                      }`}
+                    >
+                      {isPublic ? 'Công khai' : 'Cá nhân'}
+                    </div>
+                    {isPublic ? (
+                      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-semibold text-white/80">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path
+                            d="M12 21s-7-4.5-9.5-8.5C.4 9.3 2.2 6.6 5 6.2c1.5-.2 3 .4 4 1.6 1-1.2 2.5-1.8 4-1.6 2.8.4 4.6 3.1 2.5 6.3C19 16.5 12 21 12 21z"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span>{likesCount}</span>
+                      </div>
+                    ) : null}
                     {created ? (
                       <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-semibold text-white/70">
                         {created}
@@ -408,6 +430,53 @@ const MyConfigurations = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!c?._id || deletingId === String(c._id) || togglingId === String(c._id)}
+                        onClick={async () => {
+                          const id = String(c?._id || '').trim();
+                          if (!id || togglingId) return;
+                          setTogglingId(id);
+                          setError('');
+                          try {
+                            const desired = !Boolean(c?.isPublic);
+                            await setConfigurationPublic({ token, configId: id, isPublic: desired });
+                            setItems((prev) =>
+                              (Array.isArray(prev) ? prev : []).map((x) =>
+                                String(x?._id || '') === id ? { ...(x || {}), isPublic: desired, publishedAt: desired ? new Date().toISOString() : null } : x
+                              )
+                            );
+                          } catch (e) {
+                            setError(e?.message || 'FAILED_TO_UPDATE');
+                          } finally {
+                            setTogglingId('');
+                          }
+                        }}
+                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-bold transition disabled:opacity-60 ${
+                          isPublic
+                            ? 'border-white/10 bg-black/25 text-white/90 hover:bg-black/40 active:bg-black/50'
+                            : 'border-emerald-400/25 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20 active:bg-emerald-500/25'
+                        }`}
+                        title={isPublic ? 'Chuyển về cá nhân' : 'Đăng công khai'}
+                      >
+                        {togglingId === String(c._id) ? (
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                            <path d="M12 2a10 10 0 1 0 10 10" strokeLinecap="round" />
+                          </svg>
+                        ) : isPublic ? (
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 2a10 10 0 0 0-3.2 19.5" strokeLinecap="round" />
+                            <path d="M12 2a10 10 0 0 1 3.2 19.5" strokeLinecap="round" />
+                            <path d="M2 12h20" strokeLinecap="round" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M7 11V8a5 5 0 0 1 10 0v3" strokeLinecap="round" />
+                            <path d="M5 11h14v10H5V11z" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        <span>{isPublic ? 'Cá nhân' : 'Công khai'}</span>
+                      </button>
                       <button
                         type="button"
                         title={t('my_builds_delete')}

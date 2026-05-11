@@ -38,6 +38,9 @@ import {
 } from '../services/api/settings.js';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { makeComboKey, normalizeVariantKey } from '../services/combinedModels.js';
+import AnchorEditorCanvas from '../editor/anchors/AnchorEditorCanvas.jsx';
+import AnchorEditorPanel from '../editor/anchors/AnchorEditorPanel.jsx';
+import { parseAnchorsFromDb, serializeAnchorsForDb } from '../editor/anchors/anchorUtils.js';
 
 const toDigitsOnly = (value) => String(value || '').replace(/[^\d]/g, '');
 const formatVnd = (value) => {
@@ -116,6 +119,19 @@ const AdminCars = () => {
     hc: '',
     euroStandard: ''
   });
+  const [anchorEditOpen, setAnchorEditOpen] = useState(false);
+  const [anchorEditCarId, setAnchorEditCarId] = useState('');
+  const [anchorEditModelUrl, setAnchorEditModelUrl] = useState('');
+  const [anchorEditAnchors, setAnchorEditAnchors] = useState([]);
+  const [anchorEditSelectedId, setAnchorEditSelectedId] = useState('');
+  const [anchorEditAddMode, setAnchorEditAddMode] = useState(false);
+  const [anchorEditTransformMode, setAnchorEditTransformMode] = useState('translate');
+  const [anchorEditShowAnchors, setAnchorEditShowAnchors] = useState(true);
+  const [anchorEditSnapEnabled, setAnchorEditSnapEnabled] = useState(false);
+  const [anchorEditSnapPosStep, setAnchorEditSnapPosStep] = useState('0.01');
+  const [anchorEditSnapRotDeg, setAnchorEditSnapRotDeg] = useState('5');
+  const [anchorEditBusy, setAnchorEditBusy] = useState(false);
+  const [anchorEditError, setAnchorEditError] = useState('');
   const [comboUploadValues, setComboUploadValues] = useState({});
   const [comboUploadKey, setComboUploadKey] = useState('');
   const [comboUploadFiles, setComboUploadFiles] = useState([]);
@@ -612,6 +628,127 @@ const AdminCars = () => {
       euroStandard: String(em?.euroStandard || '')
     });
     setCarEditOpen(true);
+  };
+
+  const openAnchorEditor = (car) => {
+    setAnchorEditError('');
+    const id = String(car?._id || '').trim();
+    setAnchorEditCarId(id);
+    setAnchorEditModelUrl(String(car?.model3d || car?.modelUrl || '').trim());
+    setAnchorEditAnchors(parseAnchorsFromDb(car?.anchors));
+    setAnchorEditSelectedId('');
+    setAnchorEditAddMode(false);
+    setAnchorEditTransformMode('translate');
+    setAnchorEditShowAnchors(true);
+    setAnchorEditSnapEnabled(false);
+    setAnchorEditSnapPosStep('0.01');
+    setAnchorEditSnapRotDeg('5');
+    setAnchorEditOpen(true);
+  };
+
+  const closeAnchorEditor = () => {
+    setAnchorEditOpen(false);
+    setAnchorEditCarId('');
+    setAnchorEditModelUrl('');
+    setAnchorEditAnchors([]);
+    setAnchorEditSelectedId('');
+    setAnchorEditAddMode(false);
+    setAnchorEditError('');
+  };
+
+  useEffect(() => {
+    if (!anchorEditOpen) return;
+    const id = String(anchorEditCarId || '').trim();
+    if (!id) return;
+    const car = cars.find((c) => String(c?._id || '') === id);
+    if (!car) return;
+    setAnchorEditModelUrl(String(car?.model3d || car?.modelUrl || '').trim());
+    setAnchorEditAnchors(parseAnchorsFromDb(car?.anchors));
+    setAnchorEditSelectedId('');
+    setAnchorEditAddMode(false);
+  }, [anchorEditOpen, anchorEditCarId, cars]);
+
+  const anchorMakeId = () => `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const anchorClampNum = (v, fallback = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const anchorUpsertById = (id, patch) => {
+    const k = String(id || '').trim();
+    if (!k) return;
+    setAnchorEditAnchors((prev) =>
+      (Array.isArray(prev) ? prev : []).map((a) => (String(a?.id || '') === k ? { ...a, ...(patch || {}) } : a))
+    );
+  };
+
+  const anchorCreate = ({ name, category, position, rotation } = {}) => {
+    const id = anchorMakeId();
+    const next = {
+      id,
+      name: String(name || '').trim() || `anchor_${id.slice(-6)}`,
+      category: String(category || '').trim(),
+      position: Array.isArray(position) ? position.slice(0, 3) : [0, 0, 0],
+      rotation: Array.isArray(rotation) ? rotation.slice(0, 3) : [0, 0, 0]
+    };
+    setAnchorEditAnchors((prev) => [...(Array.isArray(prev) ? prev : []), next]);
+    setAnchorEditSelectedId(id);
+    return id;
+  };
+
+  const anchorAddAt = (pos) => {
+    const p = Array.isArray(pos) ? pos.slice(0, 3).map((x) => anchorClampNum(x)) : [0, 0, 0];
+    const id = anchorCreate({ name: 'new_anchor', category: '', position: p, rotation: [0, 0, 0] });
+    setAnchorEditAddMode(false);
+    return id;
+  };
+
+  const anchorUpdateTransform = (id, position, rotation) => {
+    anchorUpsertById(id, { position, rotation });
+  };
+
+  const anchorOnCreateAction = (action) => {
+    const kind = String(action?.type || '').trim();
+    if (kind === 'new') {
+      anchorCreate({ name: String(action?.name || '').trim(), category: String(action?.category || '').trim() });
+      return;
+    }
+    if (kind === 'patch') {
+      const id = String(action?.id || '').trim();
+      const patch = action?.patch && typeof action.patch === 'object' ? action.patch : {};
+      anchorUpsertById(id, patch);
+    }
+  };
+
+  const anchorDeleteSelected = () => {
+    const id = String(anchorEditSelectedId || '').trim();
+    if (!id) return;
+    setAnchorEditAnchors((prev) => (Array.isArray(prev) ? prev : []).filter((a) => String(a?.id || '') !== id));
+    setAnchorEditSelectedId('');
+  };
+
+  const anchorSaveToDb = async () => {
+    const id = String(anchorEditCarId || '').trim();
+    if (!id) return;
+    setAnchorEditError('');
+    setAnchorEditBusy(true);
+    try {
+      const payload = { anchors: serializeAnchorsForDb(anchorEditAnchors) };
+      const updated = await updateAdminCar({ token, id, payload });
+      setCars((prev) => (Array.isArray(prev) ? prev : []).map((c) => (String(c?._id || '') === id ? updated : c)));
+    } catch (e2) {
+      setAnchorEditError(e2?.message || 'SAVE_FAILED');
+    } finally {
+      setAnchorEditBusy(false);
+    }
+  };
+
+  const anchorImportPreset = ({ bikeId, anchors }) => {
+    const arr = Array.isArray(anchors) ? anchors : [];
+    setAnchorEditAnchors(arr);
+    setAnchorEditSelectedId('');
+    const nextCarId = String(bikeId || '').trim();
+    if (nextCarId) setAnchorEditCarId(nextCarId);
   };
 
   const closeEditCar = () => {
@@ -2415,6 +2552,88 @@ const AdminCars = () => {
         </div>
       ) : null}
 
+      {anchorEditOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold tracking-[0.22em] text-zinc-400">ADMIN</div>
+                <div className="mt-1 truncate text-base font-black text-zinc-50">3D Anchor Editor</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {anchorEditError ? <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">{anchorEditError}</div> : null}
+                <button
+                  type="button"
+                  disabled={anchorEditBusy}
+                  onClick={closeAnchorEditor}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-white/10 disabled:opacity-60"
+                >
+                  {t('admin_close')}
+                </button>
+              </div>
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+              <div className="min-h-0">
+                <div className="h-full">
+                  <AnchorEditorCanvas
+                    modelUrl={anchorEditModelUrl}
+                    anchors={anchorEditAnchors}
+                    selectedId={anchorEditSelectedId}
+                    focusPosition={
+                      (Array.isArray(anchorEditAnchors) ? anchorEditAnchors : []).find((a) => String(a?.id || '') === String(anchorEditSelectedId || ''))
+                        ?.position
+                    }
+                    showAnchors={anchorEditShowAnchors}
+                    addMode={anchorEditAddMode}
+                    transformMode={anchorEditTransformMode}
+                    snapEnabled={anchorEditSnapEnabled}
+                    snapPosStep={anchorClampNum(anchorEditSnapPosStep, 0.01)}
+                    snapRotDeg={anchorClampNum(anchorEditSnapRotDeg, 5)}
+                    onAddAnchorAt={anchorAddAt}
+                    onSelectAnchor={(id) => setAnchorEditSelectedId(String(id || ''))}
+                    onUpdateAnchorTransform={anchorUpdateTransform}
+                  />
+                </div>
+              </div>
+              <div className="min-h-0 overflow-hidden">
+                <AnchorEditorPanel
+                  cars={cars}
+                  selectedCarId={anchorEditCarId}
+                  onSelectCarId={(id) => setAnchorEditCarId(String(id || ''))}
+                  modelUrl={anchorEditModelUrl}
+                  onModelUrlChange={(v) => setAnchorEditModelUrl(String(v || '').trim())}
+                  anchors={anchorEditAnchors}
+                  selectedAnchorId={anchorEditSelectedId}
+                  onSelectAnchorId={(id) => setAnchorEditSelectedId(String(id || ''))}
+                  addMode={anchorEditAddMode}
+                  onToggleAddMode={() =>
+                    setAnchorEditAddMode((v) => {
+                      const next = !v;
+                      if (next) setAnchorEditShowAnchors(true);
+                      return next;
+                    })
+                  }
+                  transformMode={anchorEditTransformMode}
+                  onTransformMode={(m) => setAnchorEditTransformMode(String(m || 'translate'))}
+                  showAnchors={anchorEditShowAnchors}
+                  onShowAnchors={(v) => setAnchorEditShowAnchors(Boolean(v))}
+                  snapEnabled={anchorEditSnapEnabled}
+                  onSnapEnabled={(v) => setAnchorEditSnapEnabled(Boolean(v))}
+                  snapPosStep={anchorEditSnapPosStep}
+                  onSnapPosStep={(v) => setAnchorEditSnapPosStep(String(v || ''))}
+                  snapRotDeg={anchorEditSnapRotDeg}
+                  onSnapRotDeg={(v) => setAnchorEditSnapRotDeg(String(v || ''))}
+                  onCreateAnchor={anchorOnCreateAction}
+                  onDeleteAnchor={anchorDeleteSelected}
+                  onSaveAnchorsToDb={anchorSaveToDb}
+                  onImportPreset={anchorImportPreset}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="overflow-hidden rounded-lg border border-zinc-800">
         <table className="w-full text-left text-sm">
           <thead className="bg-zinc-900/70 text-zinc-200">
@@ -2469,6 +2688,12 @@ const AdminCars = () => {
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => openAnchorEditor(c)}
+                      className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-60"
+                    >Anchors</button>
                     <button
                       type="button"
                       disabled={busy}

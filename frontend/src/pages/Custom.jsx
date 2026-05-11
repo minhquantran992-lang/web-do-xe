@@ -40,7 +40,7 @@ const StepPill = ({ active, title, desc }) => {
 const Custom = () => {
   const nav = useNavigate();
   const { t } = useI18n();
-  const [vehicleType, setVehicleType] = useState('pkl');
+  const [vehicleType, setVehicleType] = useState('all');
   const [brands, setBrands] = useState([]);
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,14 +50,47 @@ const Custom = () => {
   const [brandKey, setBrandKey] = useState('');
   const [carId, setCarId] = useState('');
 
+  const normalizeVehicleTypeFromCategory = (category) => {
+    const k = String(category || '').trim().toLowerCase();
+    if (!k) return 'pkl';
+    if (k === 'oto' || k === 'car') return 'oto';
+    if (k === 'scooter' || k === 'underbone') return 'scooter';
+    return 'pkl';
+  };
+
+  const toBrandKey = (name) =>
+    String(name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([getBrands({ vehicleType }), getCars()])
+    Promise.all([getBrands(), getCars()])
       .then(([b, c]) => {
         if (!alive) return;
-        setBrands(Array.isArray(b) ? b : []);
-        setCars(Array.isArray(c) ? c : []);
+        const carsList = Array.isArray(c) ? c : [];
+        const brandListRaw = Array.isArray(b) ? b : [];
+
+        let nextBrands = brandListRaw;
+        if (!nextBrands.length) {
+          const seen = new Set();
+          nextBrands = carsList
+            .map((car) => String(car?.brand || '').trim())
+            .filter(Boolean)
+            .filter((name) => {
+              const key = toBrandKey(name);
+              if (!key || seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .sort((a, b) => a.localeCompare(b))
+            .map((name) => ({ key: toBrandKey(name), name, logo: '' }));
+        }
+
+        setBrands(nextBrands);
+        setCars(carsList);
         setError('');
       })
       .catch((e) => {
@@ -71,7 +104,17 @@ const Custom = () => {
     return () => {
       alive = false;
     };
-  }, [vehicleType]);
+  }, []);
+
+  const onPickVehicleType = (next) => {
+    setVehicleType(next);
+    if (brandKey) {
+      setCarId('');
+      setStep(2);
+      return;
+    }
+    setStep(1);
+  };
 
   const selectedBrand = useMemo(() => brands.find((b) => String(b?.key || '') === String(brandKey || '')) || null, [brands, brandKey]);
   const selectedCar = useMemo(() => cars.find((c) => String(c?._id || '') === String(carId || '')) || null, [cars, carId]);
@@ -116,8 +159,12 @@ const Custom = () => {
     const name = String(selectedBrand?.name || '').trim();
     if (!name) return [];
     const rx = new RegExp(`^${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i');
-    return cars.filter((c) => rx.test(String(c?.brand || ''))).slice(0, 24);
-  }, [cars, selectedBrand]);
+    const isAll = String(vehicleType || '').trim().toLowerCase() === 'all';
+    return cars
+      .filter((c) => rx.test(String(c?.brand || '')))
+      .filter((c) => (isAll ? true : normalizeVehicleTypeFromCategory(c?.category) === String(vehicleType || 'pkl')))
+      .slice(0, 24);
+  }, [cars, selectedBrand, vehicleType]);
 
   const canGoStep2 = Boolean(selectedBrand);
   const canGoStep3 = Boolean(selectedCar);
@@ -132,6 +179,7 @@ const Custom = () => {
     if (!k) return;
     setBrandKey(k);
     setCarId('');
+    setVehicleType('all');
     setStep(2);
   };
 
@@ -158,56 +206,54 @@ const Custom = () => {
               <div className="mt-2 text-sm text-zinc-400">{t('custom_desc')}</div>
             </div>
 
-            <div className="grid w-full grid-cols-3 gap-2 md:w-[320px] md:shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setVehicleType('pkl');
-                  setStep(1);
-                  setBrandKey('');
-                  setCarId('');
-                }}
-                className={
-                  vehicleType === 'pkl'
-                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
-                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
-                }
-              >
-                {t('category_pkl')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setVehicleType('scooter');
-                  setStep(1);
-                  setBrandKey('');
-                  setCarId('');
-                }}
-                className={
-                  vehicleType === 'scooter'
-                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
-                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
-                }
-              >
-                {t('category_scooter')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setVehicleType('oto');
-                  setStep(1);
-                  setBrandKey('');
-                  setCarId('');
-                }}
-                className={
-                  vehicleType === 'oto'
-                    ? 'h-10 w-full whitespace-nowrap rounded-xl bg-sky-400 px-3 text-xs font-semibold text-zinc-950'
-                    : 'h-10 w-full whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10'
-                }
-              >
-                {t('category_oto')}
-              </button>
-            </div>
+            {brandKey ? (
+              <div className="grid w-full grid-cols-4 gap-2 md:w-[360px] md:shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onPickVehicleType('pkl')}
+                  className={
+                    vehicleType === 'pkl'
+                      ? 'h-10 w-full rounded-xl bg-sky-400 px-2 text-[11px] font-semibold text-zinc-950'
+                      : 'h-10 w-full rounded-xl border border-white/10 bg-white/5 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/10'
+                  }
+                >
+                  {t('category_pkl')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPickVehicleType('scooter')}
+                  className={
+                    vehicleType === 'scooter'
+                      ? 'h-10 w-full rounded-xl bg-sky-400 px-2 text-[11px] font-semibold text-zinc-950'
+                      : 'h-10 w-full rounded-xl border border-white/10 bg-white/5 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/10'
+                  }
+                >
+                  {t('category_scooter')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPickVehicleType('oto')}
+                  className={
+                    vehicleType === 'oto'
+                      ? 'h-10 w-full rounded-xl bg-sky-400 px-2 text-[11px] font-semibold text-zinc-950'
+                      : 'h-10 w-full rounded-xl border border-white/10 bg-white/5 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/10'
+                  }
+                >
+                  {t('category_oto')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPickVehicleType('all')}
+                  className={
+                    vehicleType === 'all'
+                      ? 'h-10 w-full rounded-xl bg-sky-400 px-2 text-[11px] font-semibold text-zinc-950'
+                      : 'h-10 w-full rounded-xl border border-white/10 bg-white/5 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/10'
+                  }
+                >
+                  {t('common_all')}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {error ? <div className="mt-4 rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">{error}</div> : null}
@@ -346,13 +392,6 @@ const Custom = () => {
                 >
                   {t('custom_change_model')}
                 </button>
-                <button
-                  type="button"
-                  onClick={openConfigurator}
-                  className="rounded-xl bg-sky-400 px-4 py-2 text-xs font-semibold text-zinc-950 hover:bg-sky-300 hover:shadow-[0_0_22px_rgba(14,165,233,0.3)]"
-                >
-                  {t('custom_open_3d')}
-                </button>
               </div>
             </div>
 
@@ -382,13 +421,6 @@ const Custom = () => {
                 <div className="mt-4 text-xs text-zinc-500">
                   {t('custom_parts_note')}
                 </div>
-                <button
-                  type="button"
-                  onClick={openConfigurator}
-                  className="mt-5 w-full rounded-2xl bg-sky-400 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-sky-300 hover:shadow-[0_0_22px_rgba(14,165,233,0.3)]"
-                >
-                  {t('custom_start_attach')}
-                </button>
               </div>
             </div>
           </div>

@@ -84,6 +84,9 @@ const Configurator = () => {
   const [forcedCombinedModelKey, setForcedCombinedModelKey] = useState('');
   const [savingBuild, setSavingBuild] = useState(false);
   const [sharePromptOpen, setSharePromptOpen] = useState(false);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [savePromptName, setSavePromptName] = useState('');
+  const [savePromptShare, setSavePromptShare] = useState(false);
   const [lastSavedConfigId, setLastSavedConfigId] = useState('');
   const [sharingBuild, setSharingBuild] = useState(false);
   const [cameraState, setCameraState] = useState(null);
@@ -1133,7 +1136,22 @@ const Configurator = () => {
     }
   };
 
-  const saveBuild = async () => {
+  const openSavePrompt = () => {
+    if (savingBuild || sharingBuild) return;
+    if (!isAuthed) {
+      showToast(t('cfg_login_required'));
+      return;
+    }
+    if (!bikeId) {
+      showToast(t('cfg_save_failed'));
+      return;
+    }
+    setSavePromptName('');
+    setSavePromptShare(false);
+    setSavePromptOpen(true);
+  };
+
+  const confirmSaveBuild = async () => {
     if (savingBuild) return;
     if (!isAuthed) {
       showToast(t('cfg_login_required'));
@@ -1141,6 +1159,11 @@ const Configurator = () => {
     }
     if (!bikeId) {
       showToast(t('cfg_save_failed'));
+      return;
+    }
+    const buildName = String(savePromptName || '').trim();
+    if (!buildName) {
+      showToast('Vui lòng nhập tên bản độ.');
       return;
     }
 
@@ -1159,7 +1182,7 @@ const Configurator = () => {
         selectedColor: safeCarColor,
         selectedWheels,
         selectedParts,
-        name: ''
+        name: buildName
       });
 
       const newId = String(data?.item?._id || data?.item?.id || '');
@@ -1187,7 +1210,11 @@ const Configurator = () => {
       }
 
       showToast(t('cfg_saved'));
-      setSharePromptOpen(true);
+      if (savePromptShare && newId) {
+        await doShareBuild({ configId: newId, direct: true, name: buildName });
+      } else {
+        setSavePromptOpen(false);
+      }
     } catch (e) {
       showToast(t('cfg_save_failed'));
     } finally {
@@ -1195,7 +1222,7 @@ const Configurator = () => {
     }
   };
 
-  const doShareBuild = async ({ configId, direct }) => {
+  const doShareBuild = async ({ configId, direct, name } = {}) => {
     if (!isAuthed) {
       showToast(t('cfg_login_required'));
       return;
@@ -1209,7 +1236,7 @@ const Configurator = () => {
       await shareBuild({
         token,
         configId,
-        name: '',
+        name: String(name || '').trim(),
         backgroundKey: viewerBackground,
         camera: cameraState,
         imageData
@@ -1217,6 +1244,7 @@ const Configurator = () => {
       showToast(t('cfg_shared'));
       if (direct) showToast(t('cfg_share_redirected'));
       setSharePromptOpen(false);
+      setSavePromptOpen(false);
       nav(`/builds/${encodeURIComponent(configId)}?book=1`);
     } catch (e) {
       showToast(t('cfg_share_failed'));
@@ -1317,7 +1345,7 @@ const Configurator = () => {
         onShareBuild={shareNow}
         shareLabel="Export Build"
         shareDisabled={sharingBuild || savingBuild}
-        onSaveBuild={saveBuild}
+        onSaveBuild={openSavePrompt}
         saveLabel={t('cfg_save_build')}
         saveDisabled={savingBuild}
         onReset={resetAll}
@@ -1451,6 +1479,7 @@ const Configurator = () => {
               ref={viewerRef}
               carModelUrl={effectiveCarModelUrl}
               color={safeCarColor}
+              anchorPreset={bike?.anchors}
               highlightType={hasPickedType ? activeType : ''}
               onHoverPart={(info) => setHover3d(info)}
               onCarMeta={(meta) => {
@@ -1613,6 +1642,7 @@ const Configurator = () => {
                     <Viewer
                       carModelUrl={comboPreviewEffectiveCarModelUrl}
                       color={safeCarColor}
+                      anchorPreset={bike?.anchors}
                       highlightType=""
                       onHoverPart={() => {}}
                       onCarMeta={() => {}}
@@ -1711,6 +1741,7 @@ const Configurator = () => {
                       <Viewer
                         carModelUrl={effectiveCarModelUrl}
                         color={isHexColor(selectedComboStyle?.color) ? String(selectedComboStyle?.color).trim() : safeCarColor}
+                        anchorPreset={bike?.anchors}
                         highlightType=""
                         onHoverPart={() => {}}
                         onCarMeta={() => {}}
@@ -1857,6 +1888,74 @@ const Configurator = () => {
                   })}
                 </div>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {savePromptOpen ? (
+          <div className="fixed inset-0 z-[80]">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              aria-label={t('cfg_close')}
+              onClick={() => setSavePromptOpen(false)}
+              disabled={savingBuild || sharingBuild}
+            />
+            <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-white/10 bg-[#05070c]/95 shadow-2xl">
+              <div className="border-b border-white/10 px-5 py-4">
+                <div className="text-sm font-semibold text-white/90">Lưu bản độ</div>
+                <div className="mt-1 text-xs text-white/55">Nhập tên bản độ và chọn có muốn chia sẻ hay không.</div>
+              </div>
+              <form
+                className="space-y-4 p-5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  confirmSaveBuild();
+                }}
+              >
+                <label className="block space-y-2">
+                  <div className="text-[11px] font-semibold tracking-[0.18em] text-white/55">TÊN BẢN ĐỘ</div>
+                  <input
+                    value={savePromptName}
+                    onChange={(e) => setSavePromptName(e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/60 focus:ring-4 focus:ring-sky-400/15"
+                    placeholder="Ví dụ: XSR 155 Street"
+                    autoFocus
+                    disabled={savingBuild || sharingBuild}
+                  />
+                </label>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={savePromptShare}
+                    onChange={(e) => setSavePromptShare(e.target.checked)}
+                    disabled={savingBuild || sharingBuild}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white/90">Chia sẻ bản độ</div>
+                    <div className="mt-0.5 text-[11px] text-white/55">Bật để đưa bản độ lên cộng đồng.</div>
+                  </div>
+                </label>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm font-semibold text-white/90 transition hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => setSavePromptOpen(false)}
+                    disabled={savingBuild || sharingBuild}
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center rounded-xl border border-sky-300/25 bg-sky-400 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={savingBuild || sharingBuild}
+                  >
+                    {savingBuild || sharingBuild ? t('cfg_processing') : 'Lưu'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         ) : null}

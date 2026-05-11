@@ -4,8 +4,10 @@ const User = require('../models/User');
 const Booking = require('../models/Booking');
 const VendorReview = require('../models/VendorReview');
 const ShopPost = require('../models/ShopPost');
+const VendorBlock = require('../models/VendorBlock');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendMail } = require('../services/mailer');
+const { logSecurityEvent } = require('../security/securityLog');
 
 const parseAdminEmails = () => {
   const raw = String(process.env.ADMIN_EMAILS || '').trim().toLowerCase();
@@ -39,6 +41,85 @@ const normalizeLatLng = ({ lat, lng }) => {
   if (latNum < -90 || latNum > 90) return null;
   if (lngNum < -180 || lngNum > 180) return null;
   return { locationLat: latNum, locationLng: lngNum };
+};
+
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const isValidEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email) return false;
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at <= 0) return false;
+  if (at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!local || !domain) return false;
+  if (local.length > 64) return false;
+  if (domain.length > 255) return false;
+  if (local.startsWith('.') || local.endsWith('.')) return false;
+  if (local.includes('..')) return false;
+  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/i.test(local)) return false;
+  if (domain.includes('..')) return false;
+  if (!domain.includes('.')) return false;
+  const labels = domain.split('.');
+  if (labels.some((l) => !l || l.length > 63)) return false;
+  if (labels.some((l) => !/^[a-z0-9-]+$/i.test(l))) return false;
+  if (labels.some((l) => l.startsWith('-') || l.endsWith('-'))) return false;
+  const tld = labels[labels.length - 1] || '';
+  if (tld.length < 2 || tld.length > 63) return false;
+  return true;
+};
+
+const normalizePhone = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/[^\d+]/g, '');
+  const digits = cleaned.replace(/[^\d]/g, '');
+  if (digits.length < 8 || digits.length > 15) return '';
+  if (cleaned.startsWith('+')) return `+${digits}`;
+  return digits;
+};
+
+const normalizeForBlockedText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
+
+const isInappropriateText = (value) => {
+  const s = normalizeForBlockedText(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const profanity = [
+    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
+    /\b(dcm|dm)\b/i,
+    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
+    /(chó\s*mày|cho\s*may)/i,
+    /(dit|du|lon|cac|cak|buoi)/i
+  ];
+  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  const sensitive = [
+    /\b(porn|xxx|sex|nude)\b/i,
+    /(hiep\s*dam|rape)/i,
+    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
+    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
+    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
+  ];
+  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  return false;
+};
+
+const validateHumanName = (value) => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'REPRESENTATIVE_NAME_INAPPROPRIATE' };
+  return { ok: true, value: raw };
 };
 
 const getMyShop = asyncHandler(async (req, res) => {
@@ -138,6 +219,21 @@ const upsertMyShop = asyncHandler(async (req, res) => {
 
   const shopName = String(req.body?.shopName || '').trim();
   if (!shopName) return res.status(400).json({ error: 'MISSING_SHOP_NAME' });
+  if (isInappropriateText(shopName)) return res.status(400).json({ error: 'SHOP_NAME_INAPPROPRIATE' });
+
+  const representativeNameRaw = String(req.body?.representativeName || '').trim();
+  const checkedRep = representativeNameRaw ? validateHumanName(representativeNameRaw) : { ok: true, value: '' };
+  if (!checkedRep.ok) return res.status(400).json({ error: checkedRep.error });
+
+  const phoneRaw = String(req.body?.phone || '').trim();
+  if (phoneRaw && isInappropriateText(phoneRaw)) return res.status(400).json({ error: 'PHONE_INAPPROPRIATE' });
+  const normalizedPhone = phoneRaw ? normalizePhone(phoneRaw) : '';
+  if (phoneRaw && !normalizedPhone) return res.status(400).json({ error: 'INVALID_PHONE' });
+
+  const emailRaw = String(req.body?.email || '').trim();
+  const normalizedEmail = emailRaw ? normalizeEmail(emailRaw) : '';
+  if (normalizedEmail && !isValidEmail(normalizedEmail)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (normalizedEmail && isInappropriateText(normalizedEmail)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
 
   const existing = await Vendor.findOne({ userId }).lean();
 
@@ -234,11 +330,11 @@ const upsertMyShop = asyncHandler(async (req, res) => {
 
   const patch = {
     shopName,
-    representativeName: String(req.body?.representativeName || '').trim(),
+    representativeName: checkedRep.value,
     province: String(req.body?.province || '').trim(),
     description: String(req.body?.description || '').trim(),
-    phone: String(req.body?.phone || '').trim(),
-    email: String(req.body?.email || '').trim(),
+    phone: normalizedPhone,
+    email: normalizedEmail,
     address: String(req.body?.address || '').trim(),
     website,
     facebook: String(req.body?.facebook || '').trim(),
@@ -575,6 +671,131 @@ const deleteMyShopPost = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
+const parseDurationHours = (value) => {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const hours = Math.floor(n);
+  if (hours <= 0) return null;
+  return Math.min(24 * 365, hours);
+};
+
+const listMyBlockedUsers = asyncHandler(async (req, res) => {
+  const vendorId = String(req.vendor?._id || '').trim();
+  if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const limitRaw = Number(req.query?.limit || 50);
+  const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, Math.floor(limitRaw))) : 50;
+  const now = new Date();
+
+  const blocks = await VendorBlock.find({
+    shopId: new mongoose.Types.ObjectId(vendorId),
+    $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
+  })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const userIds = Array.isArray(blocks) ? blocks.map((b) => String(b?.userId || '')).filter(Boolean) : [];
+  const users = userIds.length
+    ? await User.find({ _id: { $in: userIds } }).select('name email avatar').lean()
+    : [];
+  const byId = new Map((Array.isArray(users) ? users : []).map((u) => [String(u?._id || ''), u]));
+
+  res.json({
+    items: (Array.isArray(blocks) ? blocks : []).map((b) => {
+      const uid = String(b?.userId || '');
+      const u = byId.get(uid);
+      return {
+        userId: uid,
+        user: u ? { id: String(u._id), name: u.name || '', email: u.email || '', avatar: u.avatar || '' } : null,
+        reason: String(b?.reason || ''),
+        expiresAt: b?.expiresAt || null,
+        createdAt: b?.createdAt || null
+      };
+    })
+  });
+});
+
+const blockUser = asyncHandler(async (req, res) => {
+  const vendorId = String(req.vendor?._id || '').trim();
+  if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const userId = String(req.body?.userId || '').trim();
+  if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'INVALID_USER_ID' });
+
+  const reason = String(req.body?.reason || '').trim().slice(0, 200);
+  const hours = parseDurationHours(req.body?.durationHours ?? req.body?.hours);
+  const expiresAt = hours ? new Date(Date.now() + hours * 60 * 60 * 1000) : null;
+
+  await VendorBlock.updateOne(
+    { shopId: new mongoose.Types.ObjectId(vendorId), userId: new mongoose.Types.ObjectId(userId) },
+    { $set: { reason, expiresAt, createdAt: new Date() }, $setOnInsert: { shopId: vendorId, userId } },
+    { upsert: true }
+  );
+
+  await logSecurityEvent({
+    req,
+    kind: 'VENDOR_BLOCK_USER',
+    outcome: 'blocked',
+    meta: { shopId: vendorId, userId, reason, expiresAt: expiresAt || null }
+  });
+
+  res.status(201).json({ ok: true, userId, expiresAt });
+});
+
+const unblockUser = asyncHandler(async (req, res) => {
+  const vendorId = String(req.vendor?._id || '').trim();
+  if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const userId = String(req.params?.userId || req.body?.userId || '').trim();
+  if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'INVALID_USER_ID' });
+
+  const del = await VendorBlock.deleteOne({
+    shopId: new mongoose.Types.ObjectId(vendorId),
+    userId: new mongoose.Types.ObjectId(userId)
+  });
+
+  await logSecurityEvent({
+    req,
+    kind: 'VENDOR_UNBLOCK_USER',
+    outcome: del?.deletedCount ? 'unblocked' : 'noop',
+    meta: { shopId: vendorId, userId }
+  });
+
+  res.json({ ok: true });
+});
+
+const reportSpamUser = asyncHandler(async (req, res) => {
+  const vendorId = String(req.vendor?._id || '').trim();
+  if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const userId = String(req.body?.userId || '').trim();
+  if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'INVALID_USER_ID' });
+
+  const reason = String(req.body?.reason || req.body?.message || '').trim().slice(0, 500);
+  const action = String(req.body?.action || '').trim().toLowerCase();
+  const shouldBlock = action === 'block' || action === 'ban';
+
+  await logSecurityEvent({
+    req,
+    kind: 'VENDOR_SPAM_REPORT',
+    outcome: shouldBlock ? 'reported_and_blocked' : 'reported',
+    meta: { shopId: vendorId, userId, reason }
+  });
+
+  if (shouldBlock) {
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await VendorBlock.updateOne(
+      { shopId: new mongoose.Types.ObjectId(vendorId), userId: new mongoose.Types.ObjectId(userId) },
+      { $set: { reason: reason.slice(0, 200), expiresAt, createdAt: new Date() }, $setOnInsert: { shopId: vendorId, userId } },
+      { upsert: true }
+    );
+  }
+
+  res.status(201).json({ ok: true });
+});
+
 module.exports = {
   getMyShop,
   upsertMyShop,
@@ -586,5 +807,9 @@ module.exports = {
   listMyShopPosts,
   createMyShopPost,
   updateMyShopPost,
-  deleteMyShopPost
+  deleteMyShopPost,
+  listMyBlockedUsers,
+  blockUser,
+  unblockUser,
+  reportSpamUser
 };

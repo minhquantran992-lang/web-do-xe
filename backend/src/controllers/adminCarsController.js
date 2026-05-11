@@ -24,6 +24,44 @@ const MODEL_LIBRARY = {
     'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb'
 };
 
+const clampNum = (v, fallback = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const normalizeAnchorName = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_:-]+/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+const normalizeAnchors = (value) => {
+  const arr = Array.isArray(value) ? value : [];
+  const out = [];
+  const seen = new Set();
+  for (const a of arr) {
+    const rawName = String(a?.name || '').trim();
+    const name = normalizeAnchorName(rawName);
+    if (!name) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const category = String(a?.category || '').trim().toLowerCase();
+    const pos = Array.isArray(a?.position) ? a.position : [0, 0, 0];
+    const rot = Array.isArray(a?.rotation) ? a.rotation : [0, 0, 0];
+    out.push({
+      id: String(a?.id || name).trim() || name,
+      name,
+      category,
+      position: [clampNum(pos[0]), clampNum(pos[1]), clampNum(pos[2])],
+      rotation: [clampNum(rot[0]), clampNum(rot[1]), clampNum(rot[2])]
+    });
+  }
+  return out;
+};
+
 const pickModel3d = ({ name, brand }) => {
   const key = normalize(name);
   if (MODEL_LIBRARY[key]) return MODEL_LIBRARY[key];
@@ -143,6 +181,15 @@ const listCarsAdmin = asyncHandler(async (req, res) => {
     engineCc: Number.isFinite(c.engineCc) ? c.engineCc : c.engineCc ?? null,
     image: c.image || c.thumbnailUrl || '',
     model3d: c.model3d || c.modelUrl || '',
+    anchors: Array.isArray(c.anchors)
+      ? c.anchors.map((a) => ({
+          id: String(a?.id || '').trim(),
+          name: String(a?.name || '').trim(),
+          category: String(a?.category || '').trim(),
+          position: Array.isArray(a?.position) ? a.position.slice(0, 3).map((x) => Number(x)) : [0, 0, 0],
+          rotation: Array.isArray(a?.rotation) ? a.rotation.slice(0, 3).map((x) => Number(x)) : [0, 0, 0]
+        }))
+      : [],
     combos: Array.isArray(c.combos)
       ? c.combos.map((x) => ({
           key: String(x?.key || '').trim(),
@@ -214,6 +261,15 @@ const createCarAdmin = asyncHandler(async (req, res) => {
       engineCc: Number.isFinite(doc.engineCc) ? doc.engineCc : doc.engineCc ?? null,
       image: doc.image || '',
       model3d: doc.model3d || '',
+      anchors: Array.isArray(doc.anchors)
+        ? doc.anchors.map((a) => ({
+            id: String(a?.id || '').trim(),
+            name: String(a?.name || '').trim(),
+            category: String(a?.category || '').trim(),
+            position: Array.isArray(a?.position) ? a.position.slice(0, 3).map((x) => Number(x)) : [0, 0, 0],
+            rotation: Array.isArray(a?.rotation) ? a.rotation.slice(0, 3).map((x) => Number(x)) : [0, 0, 0]
+          }))
+        : [],
       combos: Array.isArray(doc.combos)
         ? doc.combos.map((x) => ({
             key: String(x?.key || '').trim(),
@@ -263,6 +319,7 @@ const updateCarAdmin = asyncHandler(async (req, res) => {
   }
   if (req.body?.image !== undefined) patch.image = String(req.body?.image || '').trim();
   if (req.body?.model3d !== undefined) patch.model3d = String(req.body?.model3d || '').trim();
+  if (req.body?.anchors !== undefined) patch.anchors = normalizeAnchors(req.body.anchors);
   if (req.body?.combos !== undefined) {
     patch.combos = normalizeCombos(req.body.combos);
   }
@@ -313,6 +370,15 @@ const updateCarAdmin = asyncHandler(async (req, res) => {
       engineCc: Number.isFinite(doc.engineCc) ? doc.engineCc : doc.engineCc ?? null,
       image: doc.image || doc.thumbnailUrl || '',
       model3d: doc.model3d || doc.modelUrl || '',
+      anchors: Array.isArray(doc.anchors)
+        ? doc.anchors.map((a) => ({
+            id: String(a?.id || '').trim(),
+            name: String(a?.name || '').trim(),
+            category: String(a?.category || '').trim(),
+            position: Array.isArray(a?.position) ? a.position.slice(0, 3).map((x) => Number(x)) : [0, 0, 0],
+            rotation: Array.isArray(a?.rotation) ? a.rotation.slice(0, 3).map((x) => Number(x)) : [0, 0, 0]
+          }))
+        : [],
       combos: Array.isArray(doc.combos)
         ? doc.combos.map((x) => ({
             key: String(x?.key || '').trim(),
@@ -392,6 +458,15 @@ const uploadCombinedModelAdmin = asyncHandler(async (req, res) => {
       engineCc: Number.isFinite(doc.engineCc) ? doc.engineCc : doc.engineCc ?? null,
       image: doc.image || doc.thumbnailUrl || '',
       model3d: doc.model3d || doc.modelUrl || '',
+      anchors: Array.isArray(doc.anchors)
+        ? doc.anchors.map((a) => ({
+            id: String(a?.id || '').trim(),
+            name: String(a?.name || '').trim(),
+            category: String(a?.category || '').trim(),
+            position: Array.isArray(a?.position) ? a.position.slice(0, 3).map((x) => Number(x)) : [0, 0, 0],
+            rotation: Array.isArray(a?.rotation) ? a.rotation.slice(0, 3).map((x) => Number(x)) : [0, 0, 0]
+          }))
+        : [],
       combos: Array.isArray(doc.combos)
         ? doc.combos.map((x) => ({
             key: String(x?.key || '').trim(),

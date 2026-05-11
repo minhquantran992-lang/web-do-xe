@@ -2,10 +2,15 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 const passport = require('passport');
+const mongoose = require('mongoose');
 
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const { configurePassport } = require('./config/passport');
+const { securityContext } = require('./middleware/securityContext');
+const { rateLimit } = require('./middleware/rateLimit');
+const { botDetection } = require('./middleware/botDetection');
 
 const authRoutes = require('./routes/authRoutes');
 const carsRoutes = require('./routes/carsRoutes');
@@ -42,25 +47,69 @@ const followRoutes = require('./routes/followRoutes');
 const notificationsRoutes = require('./routes/notificationsRoutes');
 const ordersRoutes = require('./routes/ordersRoutes');
 const vendorOrdersRoutes = require('./routes/vendorOrdersRoutes');
+const adminSecurityRoutes = require('./routes/adminSecurityRoutes');
 
 const createServer = () => {
   const app = express();
+  const bootAt = Date.now();
 
   // MVP defaults:
   // - CORS open for local development
   // - JSON only APIs
   app.use(cors({ origin: true, credentials: true }));
+  app.use(cookieParser());
   app.use(express.json({ limit: '10mb' }));
   app.use(morgan('dev'));
+  app.use(securityContext);
+
+  app.use(
+    '/api',
+    botDetection,
+    rateLimit({
+      name: 'api_global_ip',
+      keyPrefix: 'api_global_ip',
+      points: 600,
+      durationSec: 60,
+      keyFn: (req) => req.clientIp
+    })
+  );
 
   configurePassport(passport);
   app.use(passport.initialize());
 
   // Healthcheck for quick verification
-  app.get('/health', (req, res) => {
+  const healthHandler = async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, service: 'carbanana-backend' });
-  });
+
+    const now = new Date();
+    const db = {
+      ok: false,
+      state: mongoose?.connection?.readyState ?? null,
+    };
+
+    try {
+      if (mongoose?.connection?.db) {
+        await mongoose.connection.db.admin().ping();
+        db.ok = true;
+      }
+    } catch (e) {
+      db.ok = false;
+      db.error = String(e?.code || e?.name || 'DB_PING_FAILED');
+    }
+
+    res.json({
+      ok: Boolean(db.ok),
+      service: 'carbanana-backend',
+      time: now.toISOString(),
+      uptimeSec: Math.max(0, Math.floor(process.uptime())),
+      since: new Date(bootAt).toISOString(),
+      db,
+      memory: process.memoryUsage(),
+    });
+  };
+
+  app.get('/health', healthHandler);
+  app.get('/api/health', healthHandler);
 
   app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
@@ -103,6 +152,7 @@ const createServer = () => {
   app.use('/admin/shadow', adminShadowRoutes);
   app.use('/api/admin/tickets', adminTicketsRoutes);
   app.use('/api/admin/finance', adminFinanceRoutes);
+  app.use('/api/admin/security', adminSecurityRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

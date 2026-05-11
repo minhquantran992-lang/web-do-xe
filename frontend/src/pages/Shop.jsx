@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { apiFetch, getApiBaseUrl } from '../services/api/client.js';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 import { useI18n } from '../services/i18n.jsx';
+import { isInappropriateText, validateEmail, validateHumanName, validatePhone } from '../services/validation.js';
 
 const toStatus = (raw) => String(raw || '').trim().toLowerCase() || 'pending';
 
@@ -483,20 +484,31 @@ const Shop = ({ mode } = {}) => {
         setApplyError('Vui lòng nhập tên xưởng.');
         return;
       }
+      if (isInappropriateText(shopName)) {
+        setApplyError('Tên xưởng không phù hợp. Vui lòng nhập tên lịch sự.');
+        return;
+      }
       if (!representativeName) {
         setApplyError('Vui lòng nhập tên người đại diện.');
+        return;
+      }
+      const checkedRep = validateHumanName(representativeName);
+      if (!checkedRep.ok) {
+        setApplyError(checkedRep.error);
         return;
       }
       if (!province) {
         setApplyError('Vui lòng nhập tỉnh/thành.');
         return;
       }
-      if (!phone) {
-        setApplyError('Vui lòng nhập số điện thoại.');
+      const checkedPhone = validatePhone(phone);
+      if (!checkedPhone.ok) {
+        setApplyError(checkedPhone.error);
         return;
       }
-      if (!email) {
-        setApplyError('Vui lòng nhập Gmail của shop.');
+      const checkedEmail = validateEmail(email);
+      if (!checkedEmail.ok) {
+        setApplyError(checkedEmail.error);
         return;
       }
 
@@ -504,14 +516,14 @@ const Shop = ({ mode } = {}) => {
         const data = await apiFetch('/api/vendor/shop', {
           token,
           method: 'PUT',
-          body: { shopName, representativeName, province, phone, email }
+          body: { shopName, representativeName: checkedRep.value, province, phone: checkedPhone.value, email: checkedEmail.value }
         });
         setShop(data?.item || null);
         await load();
       } else {
         await apiFetch('/api/vendors/apply', {
           method: 'POST',
-          body: { shopName, representativeName, province, phone, email }
+          body: { shopName, representativeName: checkedRep.value, province, phone: checkedPhone.value, email: checkedEmail.value }
         });
       }
       try {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { resetByCode } from '../services/api/auth.js';
 import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../services/i18n.jsx';
+import { validateEmail } from '../services/validation.js';
 
 const ResetByCode = () => {
   const nav = useNavigate();
@@ -17,13 +18,18 @@ const ResetByCode = () => {
   const onSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const checked = validateEmail(email);
+    if (!checked.ok) {
+      setError(checked.error);
+      return;
+    }
     if (password !== confirm) {
       setError('PASSWORDS_NOT_MATCH');
       return;
     }
     setLoading(true);
     try {
-      await resetByCode({ email, code, newPassword: password });
+      await resetByCode({ email: checked.value, code, newPassword: password });
       setDone(true);
       setTimeout(() => nav('/login'), 1200);
     } catch (err) {

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { adminRequired } = require('../middleware/auth');
+const { validateModelFile } = require('../security/uploadValidation');
 const {
   listPartsAdmin,
   createPartAdmin,
@@ -74,10 +75,32 @@ const uploadOneModel = (req, res, next) => {
   });
 };
 
+const validateModelUploaded = async (req, res, next) => {
+  const file = req.file;
+  if (!file?.path) return next();
+  try {
+    const checked = await validateModelFile({ filePath: file.path, originalName: file.originalname, maxBytes });
+    if (!checked.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      const status = checked.error === 'FILE_TOO_LARGE' || checked.error === 'GLTF_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: checked.error });
+    }
+    req.uploadStats = checked.stats || null;
+    return next();
+  } catch (e) {
+    try {
+      await fs.promises.unlink(file.path);
+    } catch {}
+    return next(e);
+  }
+};
+
 router.get('/', adminRequired, listPartsAdmin);
 router.post('/', adminRequired, createPartAdmin);
 router.put('/:id', adminRequired, updatePartAdmin);
-router.post('/upload-model', adminRequired, uploadOneModel, uploadModelPartAdmin);
+router.post('/upload-model', adminRequired, uploadOneModel, validateModelUploaded, uploadModelPartAdmin);
 router.delete('/:id', adminRequired, deletePartAdmin);
 
 module.exports = router;

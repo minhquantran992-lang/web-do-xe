@@ -11,7 +11,11 @@ const {
   listMyShopPosts,
   createMyShopPost,
   updateMyShopPost,
-  deleteMyShopPost
+  deleteMyShopPost,
+  listMyBlockedUsers,
+  blockUser,
+  unblockUser,
+  reportSpamUser
 } = require('../controllers/vendorController');
 const { getVendorBuildDetail } = require('../controllers/vendorBuildsController');
 
@@ -30,5 +34,9 @@ router.get('/posts', requireVendor, listMyShopPosts);
 router.post('/posts', requireVendor, createMyShopPost);
 router.put('/posts/:id', requireVendor, updateMyShopPost);
 router.delete('/posts/:id', requireVendor, deleteMyShopPost);
+router.get('/spam/blocks', requireVendor, listMyBlockedUsers);
+router.post('/spam/block', requireVendor, blockUser);
+router.delete('/spam/block/:userId', requireVendor, unblockUser);
+router.post('/spam/report', requireVendor, reportSpamUser);
 
 module.exports = router;

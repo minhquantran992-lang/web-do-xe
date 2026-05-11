@@ -66,6 +66,58 @@ const isValidEmail = (value) => {
   return true;
 };
 
+const normalizePhone = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/[^\d+]/g, '');
+  const digits = cleaned.replace(/[^\d]/g, '');
+  if (digits.length < 8 || digits.length > 15) return '';
+  if (cleaned.startsWith('+')) return `+${digits}`;
+  return digits;
+};
+
+const normalizeForBlockedText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
+
+const isInappropriateText = (value) => {
+  const s = normalizeForBlockedText(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const profanity = [
+    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
+    /\b(dcm|dm)\b/i,
+    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
+    /(chó\s*mày|cho\s*may)/i,
+    /(dit|du|lon|cac|cak|buoi)/i
+  ];
+  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  const sensitive = [
+    /\b(porn|xxx|sex|nude)\b/i,
+    /(hiep\s*dam|rape)/i,
+    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
+    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
+    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
+  ];
+  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
+  return false;
+};
+
+const validateHumanName = (value) => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'REPRESENTATIVE_NAME_INAPPROPRIATE' };
+  return { ok: true, value: raw };
+};
+
 const signAdminAction = ({ action, applicationId, expiresAt }) => {
   const secret = String(process.env.ADMIN_ACTION_SECRET || process.env.JWT_SECRET || '').trim();
   if (!secret) return '';
@@ -310,8 +362,22 @@ const submitPartnerApplication = asyncHandler(async (req, res) => {
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
 
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
+  if (isInappropriateText(shopName)) return res.status(400).json({ error: 'SHOP_NAME_INAPPROPRIATE' });
+  if (isInappropriateText(phone)) return res.status(400).json({ error: 'PHONE_INAPPROPRIATE' });
 
-  const item = await PartnerApplication.create({ shopName, representativeName, province, phone, email });
+  const checkedRep = validateHumanName(representativeName);
+  if (!checkedRep.ok) return res.status(400).json({ error: checkedRep.error });
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) return res.status(400).json({ error: 'INVALID_PHONE' });
+
+  const item = await PartnerApplication.create({
+    shopName,
+    representativeName: checkedRep.value,
+    province,
+    phone: normalizedPhone,
+    email
+  });
 
   const adminEmails = parseAdminEmails();
   if (adminEmails.length) {

@@ -9,6 +9,21 @@ const carSchema = new mongoose.Schema(
     engineCc: { type: Number, default: null, index: true },
     image: { type: String, default: '' },
     model3d: { type: String, default: '' },
+    anchors: {
+      type: [
+        new mongoose.Schema(
+          {
+            id: { type: String, default: '' },
+            name: { type: String, required: true },
+            category: { type: String, default: '' },
+            position: { type: [Number], default: [0, 0, 0] },
+            rotation: { type: [Number], default: [0, 0, 0] }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
     combos: {
       type: [
         new mongoose.Schema(

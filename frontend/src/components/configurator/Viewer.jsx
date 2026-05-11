@@ -6,6 +6,7 @@ const Viewer = forwardRef(({
   color,
   paintTargets,
   accessoryColors,
+  anchorPreset,
   highlightType,
   onHoverPart,
   onCarMeta,
@@ -47,6 +48,7 @@ const Viewer = forwardRef(({
         color={color}
         paintTargets={paintTargets && typeof paintTargets === 'object' ? paintTargets : {}}
         accessoryColors={accessoryColors && typeof accessoryColors === 'object' ? accessoryColors : {}}
+        anchorPreset={Array.isArray(anchorPreset) ? anchorPreset : []}
         highlightType={highlightType}
         onHoverPart={onHoverPart}
         onCarMeta={onCarMeta}

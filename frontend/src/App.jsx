@@ -23,6 +23,8 @@ import AdminCars from './pages/AdminCars.jsx';
 import AdminShadow from './pages/AdminShadow.jsx';
 import AdminTickets from './pages/AdminTickets.jsx';
 import AdminFinance from './pages/AdminFinance.jsx';
+import AdminAnchorEditor from './pages/AdminAnchorEditor.jsx';
+import AdminSecurity from './pages/AdminSecurity.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Custom from './pages/Custom.jsx';
 import Marketplace from './pages/Marketplace.jsx';
@@ -51,12 +53,6 @@ const FullscreenError = ({ title, message, detail, onRetry }) => {
             <div className="mt-1 text-sm text-zinc-300">{message}</div>
           </div>
           <div className="space-y-4 px-6 py-5">
-            {detail ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-zinc-200">
-                <div className="font-semibold text-zinc-200">Chi tiết</div>
-                <div className="mt-1 whitespace-pre-wrap break-words text-zinc-300">{detail}</div>
-              </div>
-            ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
@@ -149,6 +145,16 @@ const App = () => {
   const { isAuthed, user } = useAuth();
   const isConfigurator = location.pathname.startsWith('/configurator') || location.pathname.startsWith('/customize');
   const role = String(user?.role || '').trim().toUpperCase();
+  const isVendor = isAuthed && role === 'VENDOR' && !user?.isAdmin;
+  const vendorMode = (() => {
+    if (!isVendor) return 'user';
+    try {
+      const v = String(localStorage.getItem('carbanana.vendor.mode') || '').trim().toLowerCase();
+      return v === 'user' ? 'user' : 'seller';
+    } catch {
+      return 'seller';
+    }
+  })();
   const [fatal, setFatal] = useState(null);
   const lastFatalRef = useRef({ key: '', at: 0 });
 
@@ -166,6 +172,24 @@ const App = () => {
     } catch {}
     navigate('/seller-center', { replace: true });
   }, [isAuthed, navigate, role, user?.isAdmin]);
+
+  useEffect(() => {
+    if (!isVendor) return;
+    if (vendorMode !== 'seller') return;
+    const path = String(location?.pathname || '');
+    if (!path) return;
+    const allow =
+      path === '/' ||
+      path === '/login' ||
+      path === '/register' ||
+      path === '/forgot-password' ||
+      path === '/reset-password' ||
+      path === '/reset-by-code' ||
+      path === '/auth/callback' ||
+      path.startsWith('/seller-center');
+    if (allow) return;
+    navigate('/seller-center', { replace: true });
+  }, [isVendor, location?.pathname, navigate, vendorMode]);
 
   useEffect(() => {
     const setFatalSafe = (next) => {
@@ -273,7 +297,7 @@ const App = () => {
             path="/"
             element={
               <Page>
-                {isAuthed ? <Navigate to={role === 'VENDOR' ? '/seller-center' : '/dashboard'} replace /> : <Landing />}
+                {isAuthed ? <Navigate to={isVendor && vendorMode !== 'user' ? '/seller-center' : '/dashboard'} replace /> : <Landing />}
               </Page>
             }
           />
@@ -367,23 +391,6 @@ const App = () => {
           />
 
           <Route
-            path="/marketplace"
-            element={
-              <Page>
-                <Marketplace />
-              </Page>
-            }
-          />
-          <Route
-            path="/shops/:vendorId"
-            element={
-              <Page>
-                <Marketplace />
-              </Page>
-            }
-          />
-
-          <Route
             element={
               <RequireAuth>
                 <DashboardLayout />
@@ -394,7 +401,7 @@ const App = () => {
               path="/dashboard"
               element={
                 <Page>
-                  {role === 'VENDOR' ? <Navigate to="/seller-center" replace /> : <Dashboard />}
+                  {isVendor && vendorMode !== 'user' ? <Navigate to="/seller-center" replace /> : <Dashboard />}
                 </Page>
               }
             />
@@ -403,6 +410,37 @@ const App = () => {
               element={
                 <Page>
                   <Custom />
+                </Page>
+              }
+            />
+            <Route
+              path="/marketplace"
+              element={
+                <Page>
+                  <Marketplace />
+                </Page>
+              }
+            />
+            <Route
+              path="/shops/:vendorId"
+              element={
+                <Page>
+                  <Marketplace />
+                </Page>
+              }
+            />
+            <Route path="/bikes" element={<Page><Bikes /></Page>} />
+            <Route path="/bikes/:bikeId" element={<Page><BikeDetails /></Page>} />
+            <Route path="/parts" element={<Page><Parts /></Page>} />
+            <Route path="/builds" element={<Page><Builds /></Page>} />
+            <Route path="/builds/:id" element={<Page><BuildDetail /></Page>} />
+            <Route path="/leaderboard" element={<Page><Leaderboard /></Page>} />
+            <Route path="/booking/:id" element={<Page><BookingStatus /></Page>} />
+            <Route
+              path="/seller-center"
+              element={
+                <Page>
+                  <SellerCenter />
                 </Page>
               }
             />
@@ -487,6 +525,16 @@ const App = () => {
               }
             />
             <Route
+              path="/admin/anchors/:carId"
+              element={
+                <RequireAdmin>
+                  <Page>
+                    <AdminAnchorEditor />
+                  </Page>
+                </RequireAdmin>
+              }
+            />
+            <Route
               path="/admin/shadow"
               element={
                 <RequireAdmin>
@@ -516,29 +564,20 @@ const App = () => {
                 </RequireAdmin>
               }
             />
+            <Route
+              path="/admin/security"
+              element={
+                <RequireAdmin>
+                  <Page>
+                    <AdminSecurity />
+                  </Page>
+                </RequireAdmin>
+              }
+            />
           </Route>
-
-          <Route path="/bikes" element={<Page><Bikes /></Page>} />
-          <Route path="/bikes/:bikeId" element={<Page><BikeDetails /></Page>} />
-          <Route path="/parts" element={<Page><Parts /></Page>} />
-          <Route path="/builds" element={<Page><Builds /></Page>} />
-          <Route path="/builds/:id" element={<Page><BuildDetail /></Page>} />
-          <Route path="/leaderboard" element={<Page><Leaderboard /></Page>} />
-          <Route path="/booking/:id" element={<Page><BookingStatus /></Page>} />
 
           <Route path="/configurator/:bikeId" element={<Configurator />} />
           <Route path="/customize/:carId" element={<Configurator />} />
-
-          <Route
-            path="/seller-center"
-            element={
-              <RequireAuth>
-                <Page>
-                  <SellerCenter />
-                </Page>
-              </RequireAuth>
-            }
-          />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

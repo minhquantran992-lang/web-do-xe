@@ -69,6 +69,17 @@ const createOrder = asyncHandler(async (req, res) => {
   if (!vendor) return res.status(404).json({ error: 'SHOP_NOT_FOUND' });
   if (!build) return res.status(404).json({ error: 'BUILD_NOT_FOUND' });
 
+  const recent = await Order.findOne({
+    userId: new mongoose.Types.ObjectId(userId),
+    shopId: new mongoose.Types.ObjectId(shopId),
+    buildId: new mongoose.Types.ObjectId(buildId),
+    status: 'REQUESTED',
+    createdAt: { $gt: new Date(Date.now() - 10 * 60 * 1000) }
+  })
+    .select('_id')
+    .lean();
+  if (recent) return res.status(409).json({ error: 'ORDER_ALREADY_REQUESTED', orderId: recent._id });
+
   const now = new Date();
   const order = await Order.create({
     userId,

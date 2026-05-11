@@ -403,17 +403,14 @@ const DashboardLayout = () => {
     const Body = ({ active }) => (
       <>
         {active ? (
-          <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-sky-300 via-cyan-300 to-sky-400 opacity-90" />
-        ) : null}
-        {active ? (
           <span className="pointer-events-none absolute -inset-1 rounded-[18px] bg-[radial-gradient(400px_180px_at_18%_18%,rgba(56,189,248,0.38),transparent_62%)] opacity-90 blur-xl" />
         ) : null}
         <span
           className={[
-            'relative inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition duration-200',
+            'relative inline-flex h-10 w-10 items-center justify-center rounded-2xl transition duration-200',
             active
-              ? 'border-white/10 bg-white/10 text-zinc-50 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]'
-              : 'border-white/10 bg-white/5 text-zinc-200 group-hover:border-sky-400/25 group-hover:bg-sky-500/10'
+              ? 'text-zinc-50 drop-shadow-[0_12px_26px_rgba(56,189,248,0.25)]'
+              : 'text-zinc-200 group-hover:text-sky-100'
           ].join(' ')}
         >
           <Icon name={icon} className={active ? 'text-zinc-50' : ''} />
@@ -487,70 +484,6 @@ const DashboardLayout = () => {
           </button>
         </div>
 
-        <div className="relative mt-5 flex flex-col items-center">
-          <Link to="/dashboard" className={`group relative inline-flex items-center ${compact ? 'h-11 w-11 justify-center' : 'w-full justify-start px-4'}`}>
-            <span className="pointer-events-none absolute -inset-5 rounded-[32px] bg-[radial-gradient(760px_360px_at_30%_10%,rgba(56,189,248,0.22),transparent_62%)] blur-2xl opacity-95 transition-opacity group-hover:opacity-100" />
-            {compact ? (
-              <span className="relative grid h-11 w-11 place-items-center rounded-2xl border border-sky-400/18 bg-white/5 text-zinc-50 shadow-[0_20px_70px_-46px_rgba(56,189,248,0.70)]">
-                <span className="pointer-events-none absolute -inset-2 rounded-[22px] bg-[radial-gradient(60px_60px_at_50%_40%,rgba(34,211,238,0.38),transparent_62%)] blur-xl" />
-                <svg viewBox="0 0 200 200" className="relative h-9 w-9 drop-shadow-[0_10px_22px_rgba(56,189,248,0.35)]" aria-label={t('app_name')}>
-                  <defs>
-                    <linearGradient id="elorideMarkGradDash" x1="20" y1="40" x2="180" y2="160" gradientUnits="userSpaceOnUse">
-                      <stop offset="0" stopColor="#1d4ed8" />
-                      <stop offset="0.55" stopColor="#06b6d4" />
-                      <stop offset="1" stopColor="#22d3ee" />
-                    </linearGradient>
-                  </defs>
-                  <g fill="none" strokeLinecap="round" strokeLinejoin="round">
-                    <g stroke="url(#elorideMarkGradDash)" strokeWidth="18">
-                      <path d="M44 78C74 46 126 46 158 70H168" />
-                      <path d="M44 100H166l-18-18m18 18-18 18" />
-                      <path d="M44 122C74 154 126 154 158 130H168" />
-                    </g>
-                    <g stroke="#070b14" strokeWidth="10" opacity="0.95">
-                      <path d="M44 78C74 46 126 46 158 70H168" />
-                      <path d="M44 100H166l-18-18m18 18-18 18" />
-                      <path d="M44 122C74 154 126 154 158 130H168" />
-                    </g>
-                  </g>
-                </svg>
-              </span>
-            ) : (
-              <span className="relative w-full py-2">
-                <span className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 shadow-[0_18px_70px_-52px_rgba(56,189,248,0.35)] transition group-hover:border-sky-400/25 group-hover:bg-sky-500/10">
-                  <svg viewBox="0 0 200 200" className="h-10 w-10 shrink-0 drop-shadow-[0_18px_40px_rgba(56,189,248,0.35)]" aria-hidden="true">
-                    <defs>
-                      <linearGradient id="elorideMarkGradDashWord" x1="20" y1="40" x2="180" y2="160" gradientUnits="userSpaceOnUse">
-                        <stop offset="0" stopColor="#1d4ed8" />
-                        <stop offset="0.55" stopColor="#06b6d4" />
-                        <stop offset="1" stopColor="#22d3ee" />
-                      </linearGradient>
-                    </defs>
-                    <g fill="none" strokeLinecap="round" strokeLinejoin="round">
-                      <g stroke="url(#elorideMarkGradDashWord)" strokeWidth="18">
-                        <path d="M44 78C74 46 126 46 158 70H168" />
-                        <path d="M44 100H166l-18-18m18 18-18 18" />
-                        <path d="M44 122C74 154 126 154 158 130H168" />
-                      </g>
-                      <g stroke="#070b14" strokeWidth="10" opacity="0.95">
-                        <path d="M44 78C74 46 126 46 158 70H168" />
-                        <path d="M44 100H166l-18-18m18 18-18 18" />
-                        <path d="M44 122C74 154 126 154 158 130H168" />
-                      </g>
-                    </g>
-                  </svg>
-                  <span className="min-w-0 text-left">
-                    <span className="block whitespace-nowrap text-[16px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
-                    <span className="mt-1 block truncate text-[10px] font-semibold leading-none tracking-[0.22em] text-white/70">
-                      MOD YOUR RIDE | SYSTEM CUSTOMS
-                    </span>
-                  </span>
-                </span>
-              </span>
-            )}
-          </Link>
-        </div>
-
         <div className="relative mt-5">
           <div className={`${compact ? 'sr-only' : 'px-1 text-[11px] font-semibold tracking-[0.22em] text-zinc-500'}`}>{t('sidebar_section_menu')}</div>
           <div className="mt-3 grid gap-2.5">
@@ -572,6 +505,7 @@ const DashboardLayout = () => {
             <div className={`${compact ? 'sr-only' : 'px-1 text-[11px] font-semibold tracking-[0.22em] text-zinc-500'}`}>{t('sidebar_section_manage')}</div>
             <div className="mt-3 grid gap-2.5">
               <SidebarNavItem to="/admin/cars" label={t('nav_admin')} icon="admin" />
+              <SidebarNavItem to="/admin/security" label="Bảo mật" icon="admin" />
             </div>
           </div>
         ) : null}
@@ -606,7 +540,19 @@ const DashboardLayout = () => {
       {(() => {
         const path = String(loc?.pathname || '');
         const isProfile = path === '/profile' || path.startsWith('/profile/');
-        const showSidebar = !isProfile;
+        const role = String(user?.role || '').trim().toUpperCase();
+        const isVendor = role === 'VENDOR' && !user?.isAdmin;
+        const vendorMode = (() => {
+          if (!isVendor) return 'user';
+          try {
+            const v = String(localStorage.getItem('carbanana.vendor.mode') || '').trim().toLowerCase();
+            return v === 'user' ? 'user' : 'seller';
+          } catch {
+            return 'seller';
+          }
+        })();
+        const vendorOnlyShop = isVendor && (vendorMode === 'seller' || path.startsWith('/seller-center'));
+        const showSidebar = !isProfile && !vendorOnlyShop;
         return (
           <>
       {isHome && pwdOpen ? (
@@ -881,178 +827,214 @@ const DashboardLayout = () => {
               const path = String(loc?.pathname || '');
               const isProfile = path === '/profile' || path.startsWith('/profile/');
               const showSidebar = !isProfile;
-              return showSidebar ? (
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10 lg:hidden"
-                  aria-label={t('sidebar_open')}
-                >
-                  <Icon name="menu" />
-                </button>
-              ) : null;
+              return (
+                <>
+                  {showSidebar ? (
+                    <button
+                      type="button"
+                      onClick={() => setMobileOpen(true)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10 lg:hidden"
+                      aria-label={t('sidebar_open')}
+                    >
+                      <Icon name="menu" />
+                    </button>
+                  ) : null}
+
+                  <Link
+                    to="/dashboard"
+                    className="group inline-flex min-w-0 items-center gap-4"
+                    aria-label={t('app_name')}
+                    title={t('app_name')}
+                  >
+                    <img
+                      src="/logo-mark.png"
+                      alt={t('app_name')}
+                      className="h-16 w-16 select-none object-contain transition group-hover:opacity-90 sm:h-20 sm:w-20"
+                      draggable={false}
+                    />
+                    <span className="min-w-0 text-left">
+                      <span className="block whitespace-nowrap text-[18px] font-black leading-none tracking-[0.28em] text-white sm:text-[22px]">
+                        ELORIDE
+                      </span>
+                      <span className="mt-1 hidden whitespace-nowrap text-[11px] font-semibold leading-none tracking-[0.22em] text-white/70 sm:block">
+                        MOD YOUR RIDE | SYSTEM CUSTOMS
+                      </span>
+                    </span>
+                  </Link>
+                </>
+              );
             })()}
 
             <div className="min-w-0 flex-1">
               <SearchBar />
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    setNotifOpen((v) => !v);
-                    refreshNotifications({});
-                  }}
-                  className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
-                  aria-label={t('nav_notifications')}
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a3 3 0 006 0" />
-                  </svg>
-                  {notif.unreadCount ? (
-                    <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-sky-400 px-1 text-[11px] font-black text-zinc-950">
-                      {Math.min(99, Number(notif.unreadCount) || 0)}
-                    </span>
-                  ) : null}
-                </button>
+            <div className="flex shrink-0 items-center justify-end">
+              <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/25 p-1.5 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] backdrop-blur">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setNotifOpen((v) => !v);
+                      refreshNotifications({});
+                    }}
+                    className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 transition hover:bg-white/10"
+                    aria-label={t('nav_notifications')}
+                    title={t('nav_notifications')}
+                  >
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a3 3 0 006 0" />
+                    </svg>
+                    {notif.unreadCount ? (
+                      <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-[20px] place-items-center rounded-full bg-sky-400 px-1 text-[11px] font-black text-zinc-950">
+                        {Math.min(99, Number(notif.unreadCount) || 0)}
+                      </span>
+                    ) : null}
+                  </button>
 
-                {notifOpen ? (
-                  <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
-                    <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
-                      <div className="text-sm font-semibold text-zinc-100">{t('notifications_title')}</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!token) return;
-                            await markAllNotificationsRead({ token });
-                            await refreshNotifications({});
-                          }}
-                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
-                        >
-                          {t('notifications_mark_all')}
-                        </button>
-                        <Link
-                          to="/notifications"
-                          onClick={() => setNotifOpen(false)}
-                          className="rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/15"
-                        >
-                          {t('nav_notifications')}
-                        </Link>
+                  {notifOpen ? (
+                    <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
+                      <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+                        <div className="text-sm font-semibold text-zinc-100">{t('notifications_title')}</div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!token) return;
+                              await markAllNotificationsRead({ token });
+                              await refreshNotifications({});
+                            }}
+                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
+                          >
+                            {t('notifications_mark_all')}
+                          </button>
+                          <Link
+                            to="/notifications"
+                            onClick={() => setNotifOpen(false)}
+                            className="rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/15"
+                          >
+                            {t('nav_notifications')}
+                          </Link>
+                        </div>
+                      </div>
+
+                      <div className="max-h-[420px] overflow-y-auto p-2">
+                        {!notif.items.length ? (
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-300">
+                            {t('notifications_empty')}
+                          </div>
+                        ) : (
+                          notif.items.slice(0, 8).map((n) => {
+                            const id = String(n?._id || '');
+                            const isRead = Boolean(n?.isRead);
+                            const content = String(n?.content || '').trim() || String(n?.type || '').trim();
+                            const meta = n?.meta && typeof n.meta === 'object' ? n.meta : null;
+                            const orderId = String(meta?.orderId || '').trim();
+                            const itemType = String(meta?.itemType || '').trim();
+                            const itemId = String(meta?.itemId || '').trim();
+                            const to = orderId
+                              ? `/orders/${encodeURIComponent(orderId)}`
+                              : itemType === 'build' && itemId
+                                ? `/builds/${encodeURIComponent(itemId)}`
+                                : itemType === 'part'
+                                  ? '/parts'
+                                  : '';
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={async () => {
+                                  if (!token || !id) return;
+                                  if (!isRead) await markNotificationRead({ token, id });
+                                  await refreshNotifications({ silent: true });
+                                  setNotifOpen(false);
+                                  if (to) window.location.href = to;
+                                }}
+                                className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                                  isRead
+                                    ? 'border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10'
+                                    : 'border-sky-400/20 bg-sky-500/10 text-zinc-50 hover:bg-sky-500/15'
+                                }`}
+                              >
+                                <div className="font-semibold">{content}</div>
+                                {n?.createdAt ? (
+                                  <div className="mt-1 text-xs text-zinc-400">{new Date(n.createdAt).toLocaleString()}</div>
+                                ) : null}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
+                  ) : null}
+                </div>
 
-                    <div className="max-h-[420px] overflow-y-auto p-2">
-                      {!notif.items.length ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-300">
-                          {t('notifications_empty')}
-                        </div>
-                      ) : (
-                        notif.items.slice(0, 8).map((n) => {
-                          const id = String(n?._id || '');
-                          const isRead = Boolean(n?.isRead);
-                          const content = String(n?.content || '').trim() || String(n?.type || '').trim();
-                          const meta = n?.meta && typeof n.meta === 'object' ? n.meta : null;
-                          const orderId = String(meta?.orderId || '').trim();
-                          const itemType = String(meta?.itemType || '').trim();
-                          const itemId = String(meta?.itemId || '').trim();
-                          const to = orderId
-                            ? `/orders/${encodeURIComponent(orderId)}`
-                            : itemType === 'build' && itemId
-                              ? `/builds/${encodeURIComponent(itemId)}`
-                              : itemType === 'part'
-                                ? '/parts'
-                                : '';
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={async () => {
-                                if (!token || !id) return;
-                                if (!isRead) await markNotificationRead({ token, id });
-                                await refreshNotifications({ silent: true });
-                                setNotifOpen(false);
-                                if (to) window.location.href = to;
-                              }}
-                              className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
-                                isRead
-                                  ? 'border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10'
-                                  : 'border-sky-400/20 bg-sky-500/10 text-zinc-50 hover:bg-sky-500/15'
-                              }`}
-                            >
-                              <div className="font-semibold">{content}</div>
-                              {n?.createdAt ? (
-                                <div className="mt-1 text-xs text-zinc-400">{new Date(n.createdAt).toLocaleString()}</div>
-                              ) : null}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+                <div className="hidden h-8 w-px bg-white/10 sm:block" />
 
-              <Link
-                to="/partner-application"
-                className="inline-flex h-10 items-center justify-center rounded-2xl border border-sky-400/25 bg-sky-500/10 px-3 text-xs font-semibold text-sky-100 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:border-sky-400/40 hover:bg-sky-500/15"
-              >
-                {t('lp_cta_partner_shop')}
-              </Link>
-              <button
-                type="button"
-                onClick={toggle}
-                className="inline-flex h-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
-              >
-                {lang === 'vi' ? t('lang_en') : t('lang_vi')}
-              </button>
+                <Link
+                  to="/partner-application"
+                  title={t('lp_cta_partner_shop')}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-sky-100 transition hover:bg-white/10"
+                >
+                  <Icon name="shop" className="h-5 w-5" />
+                  <span className="hidden xl:block">{t('lp_cta_partner_shop')}</span>
+                  <span className="xl:hidden">Đối tác</span>
+                </Link>
 
-              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => setAccountOpen((v) => !v)}
-                  className="inline-flex h-10 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 shadow-[0_12px_40px_-26px_rgba(0,0,0,0.75)] transition hover:bg-white/10"
+                  onClick={toggle}
+                  title={lang === 'vi' ? t('lang_en') : t('lang_vi')}
+                  className="inline-flex h-10 items-center justify-center rounded-xl px-3 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
                 >
-                  <span className="grid h-7 w-7 place-items-center rounded-xl border border-white/10 bg-black/20 text-[11px] font-black text-white/90">
-                    {userInitials}
-                  </span>
-                  <span className="hidden max-w-[160px] truncate sm:block">{userLabel || t('common_account')}</span>
+                  {lang === 'vi' ? t('lang_en') : t('lang_vi')}
                 </button>
 
-                {accountOpen ? (
-                  <div className="absolute right-0 mt-2 w-[200px] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
-                    <Link
-                      to="/profile"
-                      onClick={() => setAccountOpen(false)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block px-4 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/5"
-                    >
-                      {t('register_btn_edit_account')}
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={openPasswordModal}
-                      className="w-full px-4 py-3 text-left text-sm font-semibold text-zinc-100 hover:bg-white/5"
-                    >
-                      {t('auth_change_password_title')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAccountOpen(false);
-                        logout();
-                      }}
-                      className="w-full px-4 py-3 text-left text-sm font-semibold text-red-200 hover:bg-red-500/10"
-                    >
-                      {t('nav_logout')}
-                    </button>
-                  </div>
-                ) : null}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setAccountOpen((v) => !v)}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
+                  >
+                    <span className="grid h-7 w-7 place-items-center rounded-xl bg-white/5 text-[11px] font-black text-white/90">
+                      {userInitials}
+                    </span>
+                    <span className="hidden max-w-[160px] truncate xl:block">{userLabel || t('common_account')}</span>
+                  </button>
+
+                  {accountOpen ? (
+                    <div className="absolute right-0 mt-2 w-[200px] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl backdrop-blur">
+                      <Link
+                        to="/profile"
+                        onClick={() => setAccountOpen(false)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block px-4 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                      >
+                        {t('register_btn_edit_account')}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={openPasswordModal}
+                        className="w-full px-4 py-3 text-left text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                      >
+                        {t('auth_change_password_title')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAccountOpen(false);
+                          logout();
+                        }}
+                        className="w-full px-4 py-3 text-left text-sm font-semibold text-red-200 hover:bg-red-500/10"
+                      >
+                        {t('nav_logout')}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>

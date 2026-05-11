@@ -5,8 +5,10 @@ const mongoose = require('mongoose');
 
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
+const RefreshSession = require('../models/RefreshSession');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendMail } = require('../services/mailer');
+const { createCsrfToken } = require('../middleware/csrfProtection');
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const isValidEmail = (value) => {
@@ -88,6 +90,25 @@ const isInappropriateText = (value) => {
   return false;
 };
 
+const validateUserEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email) return { ok: false, error: 'INVALID_EMAIL' };
+  if (!isValidEmail(email)) return { ok: false, error: 'INVALID_EMAIL' };
+  if (isInappropriateText(email)) return { ok: false, error: 'EMAIL_INAPPROPRIATE' };
+  return { ok: true, value: email };
+};
+
+const validateUserPhone = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return { ok: true, value: '' };
+  if (isInappropriateText(raw)) return { ok: false, error: 'PHONE_INAPPROPRIATE' };
+  const phone = normalizePhone(raw);
+  if (!phone) return { ok: false, error: 'INVALID_PHONE' };
+  const digits = phone.replace(/[^\d]/g, '');
+  if (digits.length < 8 || digits.length > 15) return { ok: false, error: 'INVALID_PHONE' };
+  return { ok: true, value: phone };
+};
+
 const validateUserName = (value) => {
   const raw = String(value || '').trim().replace(/\s+/g, ' ');
   if (!raw) return { ok: false, error: 'INVALID_NAME' };
@@ -108,6 +129,77 @@ const parseIdentifier = (value) => {
 const createOtpCode = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 const createOpaqueToken = () => crypto.randomBytes(24).toString('hex');
 const sha256 = (value) => crypto.createHash('sha256').update(String(value || '')).digest('hex');
+
+const getRefreshSecret = () => String(process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || '').trim();
+const hashRefreshToken = (token) => sha256(`refresh:${getRefreshSecret()}:${String(token || '')}`);
+const getAccessTokenExpiresIn = () => String(process.env.JWT_ACCESS_EXPIRES_IN || '7d').trim() || '7d';
+const getRefreshTtlDays = () => {
+  const raw = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
+  return Number.isFinite(raw) ? Math.min(365, Math.max(1, Math.floor(raw))) : 30;
+};
+
+const isProd = () => String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const setAuthCookies = (res, { refreshToken, csrfToken }) => {
+  const secure = isProd();
+  const sameSite = secure ? 'none' : 'lax';
+  const refreshDays = getRefreshTtlDays();
+  res.cookie('refreshToken', String(refreshToken || ''), {
+    httpOnly: true,
+    secure,
+    sameSite,
+    path: '/',
+    maxAge: refreshDays * 24 * 60 * 60 * 1000
+  });
+  res.cookie('csrfToken', String(csrfToken || ''), {
+    httpOnly: false,
+    secure,
+    sameSite,
+    path: '/',
+    maxAge: refreshDays * 24 * 60 * 60 * 1000
+  });
+};
+
+const clearAuthCookies = (res) => {
+  const secure = isProd();
+  const sameSite = secure ? 'none' : 'lax';
+  res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
+  res.clearCookie('csrfToken', { httpOnly: false, secure, sameSite, path: '/' });
+};
+
+const trimHeaderValue = (value, maxLen) => {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  const n = Number(maxLen);
+  const lim = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 200;
+  return s.length > lim ? s.slice(0, lim) : s;
+};
+
+const pruneRefreshSessions = async ({ userId, keep = 20 }) => {
+  const uid = String(userId || '').trim();
+  if (!uid) return;
+  const cap = Number.isFinite(Number(keep)) ? Math.max(1, Math.floor(keep)) : 20;
+  const sessions = await RefreshSession.find({ userId: uid, revokedAt: null }).sort({ createdAt: -1 }).select('_id').lean();
+  if (!Array.isArray(sessions) || sessions.length <= cap) return;
+  const toDelete = sessions.slice(cap).map((s) => s?._id).filter(Boolean);
+  if (!toDelete.length) return;
+  await RefreshSession.deleteMany({ _id: { $in: toDelete } });
+};
+
+const createRefreshSession = async ({ req, userId }) => {
+  if (!getRefreshSecret()) return { ok: false, error: 'MISSING_REFRESH_SECRET' };
+  const uid = String(userId || '').trim();
+  if (!uid) return { ok: false, error: 'MISSING_USER' };
+  const refreshToken = crypto.randomBytes(48).toString('hex');
+  const tokenHash = hashRefreshToken(refreshToken);
+  const now = new Date();
+  const ttlDays = getRefreshTtlDays();
+  const expiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
+  const ip = trimHeaderValue(req?.clientIp || req?.ip, 80);
+  const ua = trimHeaderValue(req?.headers?.['user-agent'], 300);
+  await RefreshSession.create({ userId: uid, tokenHash, createdAt: now, expiresAt, lastUsedAt: now, ip, ua });
+  await pruneRefreshSessions({ userId: uid, keep: 20 });
+  return { ok: true, refreshToken };
+};
 
 const maskEmail = (email) => {
   const e = String(email || '').trim();
@@ -340,7 +432,11 @@ const signToken = ({ userId, email, role }) => {
   const normalizedEmail = normalizeEmail(email);
   const isAdmin = normalizedEmail ? adminEmails.has(normalizedEmail) : false;
   const safeRole = isAdmin ? 'ADMIN' : normalizeRole(role);
-  return jwt.sign({ sub: String(userId), email: normalizedEmail, isAdmin, role: safeRole }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(
+    { sub: String(userId), email: normalizedEmail, isAdmin, role: safeRole },
+    process.env.JWT_SECRET,
+    { expiresIn: getAccessTokenExpiresIn() }
+  );
 };
 
 const toUserJson = (user) => {
@@ -462,18 +558,30 @@ const register = asyncHandler(async (req, res) => {
 
   let vendorPayload = null;
   if (isVendor) {
-    const email = normalizeEmail(req.body?.email);
-    if (!email) return res.status(400).json({ error: 'MISSING_FIELDS' });
-    if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+    const checkedEmail = validateUserEmail(req.body?.email);
+    if (!checkedEmail.ok) return res.status(400).json({ error: checkedEmail.error });
+    const email = checkedEmail.value;
     const existing = await User.findOne({ email }).lean();
     if (existing) return res.status(409).json({ error: 'EMAIL_EXISTS' });
     const shopName = String(req.body?.shopName || '').trim();
     if (!shopName) return res.status(400).json({ error: 'MISSING_SHOP_NAME' });
+    if (isInappropriateText(shopName)) return res.status(400).json({ error: 'SHOP_NAME_INAPPROPRIATE' });
+
+    const checkedName = name ? validateUserName(name) : { ok: true, value: '' };
+    if (!checkedName.ok) return res.status(400).json({ error: checkedName.error });
+
+    const checkedVendorPhone = validateUserPhone(req.body?.phone);
+    if (!checkedVendorPhone.ok) return res.status(400).json({ error: checkedVendorPhone.error });
+
+    const vendorEmailRaw = String(req.body?.vendorEmail || req.body?.shopEmail || '').trim();
+    const checkedVendorEmail = vendorEmailRaw ? validateUserEmail(vendorEmailRaw) : { ok: true, value: '' };
+    if (!checkedVendorEmail.ok) return res.status(400).json({ error: checkedVendorEmail.error });
+
     vendorPayload = {
       shopName,
       description: String(req.body?.description || '').trim(),
-      phone: String(req.body?.phone || '').trim(),
-      email: String(req.body?.vendorEmail || req.body?.shopEmail || '').trim(),
+      phone: checkedVendorPhone.value,
+      email: checkedVendorEmail.value,
       address: String(req.body?.address || '').trim(),
       website: String(req.body?.website || '').trim(),
       facebook: String(req.body?.facebook || '').trim(),
@@ -488,7 +596,7 @@ const register = asyncHandler(async (req, res) => {
       email,
       password: passwordHash,
       passwordHash,
-      name,
+      name: checkedName.value,
       provider: 'local',
       providerId: email,
       role
@@ -500,16 +608,21 @@ const register = asyncHandler(async (req, res) => {
   }
 
   const identifierRaw = String(req.body?.identifier || req.body?.emailOrPhone || req.body?.email || req.body?.phone || '').trim();
+  if (identifierRaw && isInappropriateText(identifierRaw)) {
+    return res.status(400).json({ error: identifierRaw.includes('@') ? 'EMAIL_INAPPROPRIATE' : 'PHONE_INAPPROPRIATE' });
+  }
   const id = parseIdentifier(identifierRaw);
   if (!id.kind) return res.status(400).json({ error: 'MISSING_FIELDS' });
   if (id.kind === 'email' && !id.email) return res.status(400).json({ error: 'INVALID_EMAIL' });
   if (id.kind === 'phone' && !id.phone) return res.status(400).json({ error: 'INVALID_PHONE' });
 
+  const checkedName = name ? validateUserName(name) : { ok: true, value: '' };
+  if (!checkedName.ok) return res.status(400).json({ error: checkedName.error });
+
   const dobRaw = String(req.body?.dob || '').trim();
   const dob = dobRaw ? new Date(dobRaw) : null;
   const gender = normalizeGender(req.body?.gender);
   const country = String(req.body?.country || '').trim();
-  if (!gender || !country) return res.status(400).json({ error: 'MISSING_FIELDS' });
 
   const now = new Date();
   const code = createOtpCode();
@@ -522,7 +635,7 @@ const register = asyncHandler(async (req, res) => {
   const echo = String(process.env.ALLOW_RESET_CODE_ECHO || '').toLowerCase() === 'true';
 
   const patch = {
-    name,
+    name: checkedName.value,
     dob: dob && !Number.isNaN(dob.getTime()) ? dob : null,
     gender,
     country,
@@ -630,6 +743,9 @@ const verifyOtp = asyncHandler(async (req, res) => {
   const identifierRaw = String(req.body?.identifier || req.body?.emailOrPhone || req.body?.email || req.body?.phone || '').trim();
   const code = String(req.body?.code || req.body?.otp || '').trim();
   if (!identifierRaw || !code) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (isInappropriateText(identifierRaw)) {
+    return res.status(400).json({ error: identifierRaw.includes('@') ? 'EMAIL_INAPPROPRIATE' : 'PHONE_INAPPROPRIATE' });
+  }
 
   const id = parseIdentifier(identifierRaw);
   if (id.kind === 'email' && !id.email) return res.status(400).json({ error: 'INVALID_EMAIL' });
@@ -689,12 +805,18 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
   const fresh = await User.findById(pending._id).select('name email provider providerId avatar createdAt role');
   const token = signToken({ userId: pending._id, email: fresh?.email, role: fresh?.role });
-  res.json({ ok: true, token, user: toUserJson(fresh) });
+  const csrfToken = createCsrfToken();
+  const refresh = await createRefreshSession({ req, userId: pending._id });
+  if (refresh.ok) setAuthCookies(res, { refreshToken: refresh.refreshToken, csrfToken });
+  res.json({ ok: true, token, csrfToken: refresh.ok ? csrfToken : '', user: toUserJson(fresh) });
 });
 
 const resendOtp = asyncHandler(async (req, res) => {
   const identifierRaw = String(req.body?.identifier || req.body?.emailOrPhone || req.body?.email || req.body?.phone || '').trim();
   if (!identifierRaw) return res.status(400).json({ error: 'MISSING_FIELDS' });
+  if (isInappropriateText(identifierRaw)) {
+    return res.status(400).json({ error: identifierRaw.includes('@') ? 'EMAIL_INAPPROPRIATE' : 'PHONE_INAPPROPRIATE' });
+  }
 
   const id = parseIdentifier(identifierRaw);
   if (id.kind === 'email' && !id.email) return res.status(400).json({ error: 'INVALID_EMAIL' });
@@ -865,7 +987,10 @@ const verifyOAuthOtp = asyncHandler(async (req, res) => {
   );
 
   const token = signToken({ userId: user._id, email: user.email, role: user.role });
-  res.json({ ok: true, token, user: toUserJson(user) });
+  const csrfToken = createCsrfToken();
+  const refresh = await createRefreshSession({ req, userId: user._id });
+  if (refresh.ok) setAuthCookies(res, { refreshToken: refresh.refreshToken, csrfToken });
+  res.json({ ok: true, token, csrfToken: refresh.ok ? csrfToken : '', user: toUserJson(user) });
 });
 
 const resendOAuthOtp = asyncHandler(async (req, res) => {
@@ -911,6 +1036,7 @@ const login = asyncHandler(async (req, res) => {
 
   if (!email || !password) return res.status(400).json({ error: 'MISSING_FIELDS' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
 
   let user = await User.findOne({ email }).select('+password +passwordHash name email provider providerId avatar createdAt role');
   if (!user) {
@@ -965,7 +1091,10 @@ const login = asyncHandler(async (req, res) => {
     await User.updateOne({ _id: user._id }, { $set: { role } });
   }
   const token = signToken({ userId: user._id, email: user.email, role });
-  res.json({ ok: true, token, user: toUserJson(user) });
+  const csrfToken = createCsrfToken();
+  const refresh = await createRefreshSession({ req, userId: user._id });
+  if (refresh.ok) setAuthCookies(res, { refreshToken: refresh.refreshToken, csrfToken });
+  res.json({ ok: true, token, csrfToken: refresh.ok ? csrfToken : '', user: toUserJson(user) });
 });
 
 const completeOAuthLogin = async ({ provider, providerId, email, name, avatar }) => {
@@ -1002,6 +1131,7 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
   const user = await User.findOne({ email }).select('_id');
   if (!user) {
     console.log(`[auth] request-reset ignored: email not found (${email})`);
@@ -1062,6 +1192,7 @@ const resetPasswordByCode = asyncHandler(async (req, res) => {
   const newPassword = String(req.body?.newPassword || '');
   if (!email || !code || !newPassword) return res.status(400).json({ error: 'MISSING_FIELDS' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
   if (newPassword.length < 6) return res.status(400).json({ error: 'WEAK_PASSWORD' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
@@ -1084,6 +1215,7 @@ const verifyResetCode = asyncHandler(async (req, res) => {
   const code = String(req.body?.code || '');
   if (!email || !code) return res.status(400).json({ error: 'MISSING_FIELDS' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
   const user = await User.findOne({
@@ -1099,6 +1231,7 @@ const requestVerifyEmail = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
   const user = await User.findOne({ email }).select('_id emailVerified');
   if (!user) return res.json({ ok: true });
   if (user.emailVerified) return res.json({ ok: true });
@@ -1126,6 +1259,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
   const code = String(req.body?.code || '');
   if (!email || !code) return res.status(400).json({ error: 'MISSING_FIELDS' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   const now = new Date();
   const user = await User.findOne({
@@ -1180,7 +1314,11 @@ const updateMe = asyncHandler(async (req, res) => {
     if (!checked.ok) return res.status(400).json({ error: checked.error });
     patch.name = checked.value;
   }
-  if (req.body?.phone != null) patch.phone = String(req.body.phone || '').trim().slice(0, 30);
+  if (req.body?.phone != null) {
+    const checkedPhone = validateUserPhone(req.body.phone);
+    if (!checkedPhone.ok) return res.status(400).json({ error: checkedPhone.error });
+    patch.phone = checkedPhone.value;
+  }
   if (req.body?.gender != null) patch.gender = normalizeGender(req.body.gender);
   if (req.body?.country != null) patch.country = String(req.body.country || '').trim().slice(0, 40);
   if (req.body?.city != null) patch.city = String(req.body.city || '').trim().slice(0, 60);
@@ -1216,6 +1354,56 @@ const setMyAvatar = asyncHandler(async (req, res) => {
   res.json({ ok: true, user: toUserJson(user) });
 });
 
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const refreshToken = String(req.cookies?.refreshToken || '').trim();
+  if (!refreshToken) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  if (!getRefreshSecret()) return res.status(500).json({ error: 'MISSING_REFRESH_SECRET' });
+
+  const now = new Date();
+  const tokenHash = hashRefreshToken(refreshToken);
+  const session = await RefreshSession.findOne({
+    tokenHash,
+    revokedAt: null,
+    expiresAt: { $gt: now }
+  })
+    .select('_id userId')
+    .lean();
+  if (!session) return res.status(401).json({ error: 'UNAUTHORIZED' });
+
+  const user = await User.findById(session.userId).select('email role').lean();
+  if (!user) {
+    await RefreshSession.updateOne({ _id: session._id }, { $set: { revokedAt: now } });
+    clearAuthCookies(res);
+    return res.status(401).json({ error: 'UNAUTHORIZED' });
+  }
+
+  const nextRefreshToken = crypto.randomBytes(48).toString('hex');
+  const nextHash = hashRefreshToken(nextRefreshToken);
+  const ip = trimHeaderValue(req?.clientIp || req?.ip, 80);
+  const ua = trimHeaderValue(req?.headers?.['user-agent'], 300);
+  await RefreshSession.updateOne(
+    { _id: session._id },
+    { $set: { tokenHash: nextHash, lastUsedAt: now, rotatedAt: now, ip, ua } }
+  );
+
+  const csrfToken = String(req.cookies?.csrfToken || '').trim() || createCsrfToken();
+  setAuthCookies(res, { refreshToken: nextRefreshToken, csrfToken });
+
+  const token = signToken({ userId: session.userId, email: user.email, role: user.role });
+  res.json({ ok: true, token, csrfToken });
+});
+
+const logout = asyncHandler(async (req, res) => {
+  const refreshToken = String(req.cookies?.refreshToken || '').trim();
+  const now = new Date();
+  if (refreshToken && getRefreshSecret()) {
+    const tokenHash = hashRefreshToken(refreshToken);
+    await RefreshSession.updateOne({ tokenHash, revokedAt: null }, { $set: { revokedAt: now } });
+  }
+  clearAuthCookies(res);
+  res.json({ ok: true });
+});
+
 module.exports = {
   register,
   verifyOtp,
@@ -1236,5 +1424,7 @@ module.exports = {
   verifyEmail,
   getMe,
   updateMe,
-  setMyAvatar
+  setMyAvatar,
+  refreshAccessToken,
+  logout
 };

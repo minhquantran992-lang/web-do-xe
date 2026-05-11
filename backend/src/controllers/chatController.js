@@ -4,6 +4,8 @@ const ChatThread = require('../models/ChatThread');
 const ChatMessage = require('../models/ChatMessage');
 const Vendor = require('../models/Vendor');
 const User = require('../models/User');
+const VendorBlock = require('../models/VendorBlock');
+const { logSecurityEvent } = require('../security/securityLog');
 
 const clampLimit = (v, def = 30, min = 1, max = 100) => {
   const n = Number(v);
@@ -20,6 +22,38 @@ const toPreviewText = (v) => {
 };
 
 const notHiddenExpr = (field) => ({ $or: [{ [field]: { $exists: false } }, { [field]: null }] });
+
+const CHAT_STATE = new Map();
+
+const normalizeMsg = (v) =>
+  String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .slice(0, 4000);
+
+const hashMsg = (v) => {
+  const s = normalizeMsg(v);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i);
+  return String(h >>> 0);
+};
+
+const hasLink = (v) => {
+  const s = String(v ?? '');
+  if (!s) return false;
+  if (/https?:\/\//i.test(s)) return true;
+  if (/www\./i.test(s)) return true;
+  if (/[a-z0-9-]+\.[a-z]{2,}(\/|\s|$)/i.test(s)) return true;
+  return false;
+};
+
+const isProfane = (v) => {
+  const s = normalizeMsg(v);
+  if (!s) return false;
+  const bad = ['địt', 'dit', 'đụ', 'du', 'cặc', 'cak', 'cac', 'lồn', 'lon', 'buồi', 'buoi', 'đĩ', 'di~', 'fuck', 'shit'];
+  return bad.some((w) => (w ? s.includes(w) : false));
+};
 
 const hardDeleteThread = async ({ threadId }) => {
   await Promise.all([ChatMessage.deleteMany({ threadId }), ChatThread.deleteOne({ _id: threadId })]);
@@ -134,11 +168,70 @@ const sendMyMessage = asyncHandler(async (req, res) => {
   const thread = await ChatThread.findOne({ _id: threadId, userId }).lean();
   if (!thread) return res.status(404).json({ error: 'NOT_FOUND' });
 
+  const now = new Date();
+  const blocked = await VendorBlock.findOne({
+    shopId: thread.shopId,
+    userId,
+    $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
+  }).lean();
+  if (blocked) {
+    await logSecurityEvent({
+      req,
+      kind: 'chat',
+      outcome: 'blocked_by_vendor',
+      score: 80,
+      meta: { threadId, shopId: String(thread.shopId || ''), userId }
+    });
+    return res.status(403).json({ error: 'USER_BLOCKED_BY_SHOP' });
+  }
+
   const text = safeText(req.body?.text);
   if (!text) return res.status(400).json({ error: 'EMPTY_MESSAGE' });
   if (text.length > 4000) return res.status(400).json({ error: 'MESSAGE_TOO_LONG' });
 
-  const now = new Date();
+  if (isProfane(text)) {
+    await logSecurityEvent({ req, kind: 'chat', outcome: 'blocked_profanity', score: 60, meta: { threadId } });
+    return res.status(400).json({ error: 'PROFANITY_BLOCKED' });
+  }
+  if (hasLink(text)) {
+    await logSecurityEvent({ req, kind: 'chat', outcome: 'blocked_link', score: 55, meta: { threadId } });
+    return res.status(400).json({ error: 'LINKS_BLOCKED' });
+  }
+
+  const nowMs = Date.now();
+  const stateKey = `user:${userId}:thread:${threadId}`;
+  const prev = CHAT_STATE.get(stateKey) || { lastAt: 0, lastHash: '', strikes: 0, hits: [] };
+  const hits = Array.isArray(prev.hits) ? prev.hits.filter((t) => nowMs - (Number(t) || 0) < 10_000) : [];
+  hits.push(nowMs);
+
+  const msgHash = hashMsg(text);
+  if (prev.lastHash && msgHash === prev.lastHash && nowMs - Number(prev.lastAt || 0) < 30_000) {
+    const retryAfterMs = 10_000;
+    CHAT_STATE.set(stateKey, { ...prev, lastAt: nowMs, lastHash: msgHash, strikes: (Number(prev.strikes) || 0) + 1, hits });
+    await logSecurityEvent({ req, kind: 'chat', outcome: 'blocked_duplicate', score: 70, meta: { threadId, retryAfterMs } });
+    return res.status(429).json({ error: 'RATE_LIMITED', retryAfterMs });
+  }
+
+  const baseCooldown = 900;
+  const strikes = Math.max(0, Number(prev.strikes) || 0);
+  const cooldownMs = Math.min(15_000, baseCooldown + strikes * 600);
+  const since = nowMs - Number(prev.lastAt || 0);
+  if (prev.lastAt && since < cooldownMs) {
+    const retryAfterMs = Math.max(250, cooldownMs - since);
+    CHAT_STATE.set(stateKey, { ...prev, hits });
+    await logSecurityEvent({ req, kind: 'chat', outcome: 'blocked_cooldown', score: 45, meta: { threadId, retryAfterMs } });
+    return res.status(429).json({ error: 'RATE_LIMITED', retryAfterMs });
+  }
+
+  if (hits.length >= 8) {
+    const retryAfterMs = 15_000;
+    CHAT_STATE.set(stateKey, { ...prev, lastAt: nowMs, lastHash: msgHash, strikes: strikes + 2, hits });
+    await logSecurityEvent({ req, kind: 'chat', outcome: 'blocked_flood', score: 75, meta: { threadId, retryAfterMs } });
+    return res.status(429).json({ error: 'RATE_LIMITED', retryAfterMs });
+  }
+
+  CHAT_STATE.set(stateKey, { ...prev, lastAt: nowMs, lastHash: msgHash, strikes: Math.max(0, strikes - 1), hits });
+
   const msg = await ChatMessage.create({ threadId, senderType: 'user', senderId: userId, text });
   await ChatThread.updateOne(
     { _id: threadId },

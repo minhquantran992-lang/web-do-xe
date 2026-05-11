@@ -4,6 +4,7 @@ import { registerOtp, resendOtp, verifyOtp } from '../services/api/auth.js';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
+import { validateEmail, validateHumanName } from '../services/validation.js';
 
 const normalizeNext = (value) => {
   const v = String(value || '').trim();
@@ -15,33 +16,6 @@ const normalizeNext = (value) => {
 
 const OTP_LEN = 6;
 const REGISTER_DRAFT_KEY = 'eloride.register_draft_v1';
-
-const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
-const isValidEmail = (value) => {
-  const email = normalizeEmail(value);
-  if (!email) return false;
-  if (email.length > 254) return false;
-  const at = email.indexOf('@');
-  if (at <= 0) return false;
-  if (at !== email.lastIndexOf('@')) return false;
-  const local = email.slice(0, at);
-  const domain = email.slice(at + 1);
-  if (!local || !domain) return false;
-  if (local.length > 64) return false;
-  if (domain.length > 255) return false;
-  if (local.startsWith('.') || local.endsWith('.')) return false;
-  if (local.includes('..')) return false;
-  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/i.test(local)) return false;
-  if (domain.includes('..')) return false;
-  if (!domain.includes('.')) return false;
-  const labels = domain.split('.');
-  if (labels.some((l) => !l || l.length > 63)) return false;
-  if (labels.some((l) => !/^[a-z0-9-]+$/i.test(l))) return false;
-  if (labels.some((l) => l.startsWith('-') || l.endsWith('-'))) return false;
-  const tld = labels[labels.length - 1] || '';
-  if (tld.length < 2 || tld.length > 63) return false;
-  return true;
-};
 const isStrongPassword = (value) => {
   const v = String(value || '');
   if (v.length < 8) return false;
@@ -527,10 +501,12 @@ const Register = () => {
   const otpDigits = otpValue.replace(/[^\d]/g, '');
   const fullName = useMemo(() => `${String(lastName || '').trim()} ${String(firstName || '').trim()}`.trim(), [firstName, lastName]);
   const passwordStrong = useMemo(() => isStrongPassword(password), [password]);
-  const identifierValid = useMemo(() => isValidEmail(identifier), [identifier]);
+  const checkedIdentifier = useMemo(() => validateEmail(identifier), [identifier]);
+  const identifierValid = Boolean(checkedIdentifier?.ok);
+  const safeIdentifier = checkedIdentifier?.ok ? checkedIdentifier.value : String(identifier || '').trim();
+  const checkedName = useMemo(() => validateHumanName(fullName), [fullName]);
   const canStep1 = Boolean(
-    String(lastName || '').trim() &&
-      String(firstName || '').trim() &&
+    checkedName.ok &&
       String(dobYear || '').trim() &&
       String(dobMonth || '').trim() &&
       String(dobDay || '').trim() &&
@@ -578,6 +554,7 @@ const Register = () => {
     if (!msg) return '';
     if (msg === 'MISSING_FIELDS') return t('register_error_missing_fields');
     if (msg === 'INVALID_EMAIL') return t('register_error_identifier_invalid');
+    if (msg === 'EMAIL_INAPPROPRIATE') return 'Email không phù hợp. Vui lòng nhập email lịch sự.';
     if (msg === 'EMAIL_EXISTS')
       return (
         <span>
@@ -592,6 +569,8 @@ const Register = () => {
     if (msg === 'OTP_LOCKED') return t('register_error_otp_locked');
     if (msg === 'EMAIL_ALREADY_LINKED') return t('register_error_email_already_linked');
     if (msg === 'WEAK_PASSWORD') return t('register_error_password_strength');
+    if (msg === 'INVALID_NAME') return 'Tên không hợp lệ.';
+    if (msg === 'NAME_INAPPROPRIATE') return 'Tên không phù hợp. Vui lòng nhập tên lịch sự.';
     if (msg === 'REGISTER_FAILED') return t('register_error_register_failed');
     if (msg === 'TERMS_REQUIRED') return t('register_error_terms_required');
     if (msg === 'VERIFY_FAILED') return t('register_error_verify_failed');
@@ -639,13 +618,14 @@ const Register = () => {
     setError('');
     setTriedStep2(true);
     if (!canStep2) return;
+    if (!checkedIdentifier.ok) return;
     if (!termsAccepted) {
       setError('TERMS_REQUIRED');
       return;
     }
     setLoading(true);
     try {
-      const data = await registerOtp({ name: fullName, dob, gender, country, identifier, password });
+      const data = await registerOtp({ name: fullName, dob, gender, country, identifier: safeIdentifier, password });
       if (data?.token) {
         setAuth({ token: data.token, user: data.user });
         sessionStorage.removeItem(REGISTER_DRAFT_KEY);
@@ -669,11 +649,11 @@ const Register = () => {
     e.preventDefault();
     setError('');
     setTriedStep3(true);
-    if (!String(identifier || '').trim() || !canStep3) return;
+    if (!safeIdentifier || !canStep3) return;
     if (otpLockedUntil && Date.now() < otpLockedUntil) return;
     setLoading(true);
     try {
-      const data = await verifyOtp({ identifier, code: otpValue });
+      const data = await verifyOtp({ identifier: safeIdentifier, code: otpValue });
       setAuth({ token: data.token, user: data.user });
       sessionStorage.removeItem(REGISTER_DRAFT_KEY);
       nav(next, { replace: true });
@@ -703,7 +683,7 @@ const Register = () => {
     setError('');
     setResendLoading(true);
     try {
-      await resendOtp({ identifier });
+      await resendOtp({ identifier: safeIdentifier });
       setResendCooldownUntil(Date.now() + 30 * 1000);
     } catch (err) {
       const code = String(err?.message || '').trim();
@@ -800,6 +780,8 @@ const Register = () => {
                     </div>
                     {triedStep1 && (!String(lastName || '').trim() || !String(firstName || '').trim()) ? (
                       <div className="mt-2 text-sm text-red-300">{t('register_error_fullname_required')}</div>
+                    ) : triedStep1 && String(lastName || '').trim() && String(firstName || '').trim() && !checkedName.ok ? (
+                      <div className="mt-2 text-sm text-red-300">{checkedName.error}</div>
                     ) : null}
                   </div>
 
@@ -1016,7 +998,7 @@ const Register = () => {
                     {triedStep2 && !String(identifier || '').trim() ? (
                       <div className="mt-2 text-sm text-red-300">{t('register_error_identifier_required')}</div>
                     ) : (triedStep2 || identifierTouched) && String(identifier || '').trim() && !identifierValid ? (
-                      <div className="mt-2 text-sm text-red-300">{t('register_error_identifier_invalid')}</div>
+                      <div className="mt-2 text-sm text-red-300">{checkedIdentifier.error || t('register_error_identifier_invalid')}</div>
                     ) : null}
                   </label>
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, getApiBaseUrl } from '../../services/api/client.js';
 import { useAuth } from '../../services/auth/AuthContext.jsx';
 import { useI18n } from '../../services/i18n.jsx';
+import { isInappropriateText, validatePhone } from '../../services/validation.js';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -147,6 +148,17 @@ const ShopProfile = ({ onSaved }) => {
         return;
       }
     }
+    const shopName = String(form.shopName || '').trim();
+    if (shopName && isInappropriateText(shopName)) {
+      setError('Tên xưởng không phù hợp. Vui lòng nhập tên lịch sự.');
+      return;
+    }
+    const phoneRaw = String(form.phone || '').trim();
+    const checkedPhone = phoneRaw ? validatePhone(phoneRaw) : { ok: true, value: '' };
+    if (!checkedPhone.ok) {
+      setError(checkedPhone.error);
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -155,9 +167,9 @@ const ShopProfile = ({ onSaved }) => {
         token,
         method: 'PUT',
         body: {
-          shopName: String(form.shopName || '').trim(),
+          shopName,
           address: String(form.address || '').trim(),
-          phone: String(form.phone || '').trim(),
+          phone: checkedPhone.value,
           logo: String(form.logo || '').trim(),
           coverImage: String(form.coverImage || '').trim(),
           representativeName: String(initial?.representativeName || '').trim(),

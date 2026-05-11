@@ -21,7 +21,7 @@ const fmtClock = (iso) => {
 
 const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center' }) => {
   const nav = useNavigate();
-  const { logout, token } = useAuth();
+  const { logout, token, user } = useAuth();
   const { lang, toggle, t } = useI18n();
   const [acceptingBookings, setAcceptingBookings] = useState(true);
   const [acceptingBusy, setAcceptingBusy] = useState(false);
@@ -46,6 +46,18 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
     const b = (parts[1] || '')[0] || '';
     return `${a}${b}`.toUpperCase();
   }, [userName]);
+
+  const canSwitchToUser = (() => {
+    const role = String(user?.role || '').trim().toUpperCase();
+    return role === 'VENDOR' && !user?.isAdmin;
+  })();
+
+  const switchToUserMode = () => {
+    try {
+      localStorage.setItem('carbanana.vendor.mode', 'user');
+    } catch {}
+    nav('/dashboard', { replace: true });
+  };
 
   const fetchMyShop = async () => {
     try {
@@ -355,6 +367,16 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
               </span>
             ) : null}
           </button>
+
+          {canSwitchToUser ? (
+            <button
+              type="button"
+              onClick={switchToUserMode}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10"
+            >
+              Quay về tài khoản thường
+            </button>
+          ) : null}
 
           <button
             type="button"

@@ -5,6 +5,7 @@ import { confirmMyBooking, createBooking, finishMyBooking, getMyBooking, rejectM
 import { apiFetch, apiFetchForm, getApiBaseUrl } from '../services/api/client.js';
 import { listPartneredShops } from '../services/api/vendors.js';
 import { useAuth } from '../services/auth/AuthContext.jsx';
+import { validateHumanName } from '../services/validation.js';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -16,48 +17,6 @@ const toDateInputValue = (value) => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
-};
-
-const normalizeForBlockedText = (value) =>
-  String(value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[\s\-_.]+/g, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
-    .trim();
-
-const isInappropriateText = (value) => {
-  const s = normalizeForBlockedText(value);
-  if (!s) return false;
-  const compact = s.replace(/\s+/g, '');
-  const profanity = [
-    /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
-    /\b(dcm|dm)\b/i,
-    /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
-    /(chó\s*mày|cho\s*may)/i,
-    /(dit|du|lon|cac|cak|buoi)/i
-  ];
-  if (profanity.some((rx) => rx.test(s) || rx.test(compact))) return true;
-  const sensitive = [
-    /\b(porn|xxx|sex|nude)\b/i,
-    /(hiep\s*dam|rape)/i,
-    /(au\s*dam|pedo|pedophile|child\s*porn)/i,
-    /(tu\s*tu|suicide|kill\s*(myself|yourself))/i,
-    /(ma\s*tuy|cocaine|heroin|meth|mdma|\bweed\b|can\s*sa)/i
-  ];
-  if (sensitive.some((rx) => rx.test(s) || rx.test(compact))) return true;
-  return false;
-};
-
-const validateHumanName = (value) => {
-  const raw = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!raw) return { ok: false, error: 'Vui lòng nhập họ và tên.' };
-  if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'Tên không hợp lệ.' };
-  if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
-  if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'Tên không hợp lệ.' };
-  if (isInappropriateText(raw)) return { ok: false, error: 'Tên không phù hợp. Vui lòng nhập tên lịch sự.' };
-  return { ok: true, value: raw };
 };
 
 const KYC_COUNTRY_OTHER = '__other__';

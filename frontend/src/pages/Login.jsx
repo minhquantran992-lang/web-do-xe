@@ -5,6 +5,7 @@ import { useAuth } from '../services/auth/AuthContext.jsx';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { validateEmail } from '../services/validation.js';
 
 const getLoginCarBgUrl = () => {
   try {
@@ -81,9 +82,14 @@ const Login = () => {
   const onSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const checked = validateEmail(email);
+    if (!checked.ok) {
+      setError(checked.error);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await login({ email, password });
+      const data = await login({ email: checked.value, password });
       setAuth({ token: data.token, user: data.user });
       nav(next, { replace: true });
     } catch (err) {
@@ -107,27 +113,12 @@ const Login = () => {
               <div className="mb-7 flex items-center justify-between gap-3">
                 <Link to="/" className="inline-flex items-center">
                   <span className="flex items-center gap-3">
-                    <svg viewBox="0 0 200 200" className="h-10 w-10 shrink-0 drop-shadow-[0_18px_40px_rgba(56,189,248,0.35)]" aria-hidden="true">
-                      <defs>
-                        <linearGradient id="elorideMarkGradLogin" x1="20" y1="40" x2="180" y2="160" gradientUnits="userSpaceOnUse">
-                          <stop offset="0" stopColor="#1d4ed8" />
-                          <stop offset="0.55" stopColor="#06b6d4" />
-                          <stop offset="1" stopColor="#22d3ee" />
-                        </linearGradient>
-                      </defs>
-                      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
-                        <g stroke="url(#elorideMarkGradLogin)" strokeWidth="18">
-                          <path d="M44 78C74 46 126 46 158 70H168" />
-                          <path d="M44 100H166l-18-18m18 18-18 18" />
-                          <path d="M44 122C74 154 126 154 158 130H168" />
-                        </g>
-                        <g stroke="#070b14" strokeWidth="10" opacity="0.95">
-                          <path d="M44 78C74 46 126 46 158 70H168" />
-                          <path d="M44 100H166l-18-18m18 18-18 18" />
-                          <path d="M44 122C74 154 126 154 158 130H168" />
-                        </g>
-                      </g>
-                    </svg>
+                    <img
+                      src="/logo-mark.png"
+                      alt="ELORIDE"
+                      className="h-20 w-20 shrink-0 select-none drop-shadow-[0_18px_40px_rgba(56,189,248,0.35)]"
+                      draggable={false}
+                    />
                     <span className="min-w-0 text-left">
                       <span className="block text-[18px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
                       <span className="mt-1 block text-[9px] font-semibold leading-none tracking-[0.22em] text-white/70">

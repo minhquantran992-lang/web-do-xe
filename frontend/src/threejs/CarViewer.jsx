@@ -1,7 +1,7 @@
 import { Canvas, useThree } from '@react-three/fiber';
 import { Environment, OrbitControls } from '@react-three/drei';
 import React, { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Box3, Matrix4, Mesh, Object3D, Vector3 } from 'three';
+import { Box3, MathUtils, Matrix4, Mesh, Object3D, Vector3 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { acquireGLTF, releaseGLTF } from './gltfCache.js';
 import { getApiBaseUrl } from '../services/api/client.js';
@@ -807,6 +807,7 @@ const BikeRig = ({
   url,
   color,
   paintTargets,
+  anchorPreset,
   slots,
   embeddedConfig,
   accessoryColors,
@@ -825,7 +826,41 @@ const BikeRig = ({
   const pendingTokenRef = useRef(new Map());
   const meshesByCategoryRef = useRef(new Map());
   const meshCentersRef = useRef(new WeakMap());
+  const anchorPresetByNameRef = useRef(new Map());
+  const anchorPresetByCategoryRef = useRef(new Map());
   const [ready, setReady] = useState(false);
+
+  const normalizeAnchorKeyLoose = (value) => {
+    const raw = normalizeName(value);
+    return raw
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/đ/g, 'd')
+      .trim();
+  };
+
+  const canonicalAnchorCategory = (value) => {
+    const k = normalizeAnchorKeyLoose(value);
+    if (!k) return '';
+    if (k === 'p') return 'exhaust';
+    const byRules = classifySwapTarget(k);
+    if (byRules) return byRules;
+    return k;
+  };
+
+  useEffect(() => {
+    const arr = Array.isArray(anchorPreset) ? anchorPreset : [];
+    const byName = new Map();
+    const byCategory = new Map();
+    for (const a of arr) {
+      const nameKey = normalizeAnchorKeyLoose(a?.name || '');
+      if (nameKey && !byName.has(nameKey)) byName.set(nameKey, a);
+      const categoryKey = canonicalAnchorCategory(a?.category || '');
+      if (categoryKey && !byCategory.has(categoryKey)) byCategory.set(categoryKey, a);
+    }
+    anchorPresetByNameRef.current = byName;
+    anchorPresetByCategoryRef.current = byCategory;
+  }, [anchorPreset]);
 
   const emitMeta = () => {
     if (!onMeta) return;
@@ -865,15 +900,58 @@ const BikeRig = ({
     // Priority:
     // 1) Exact mount socket in base bike (recommended).
     // 2) Fallback: approximate from original category meshes bounding box (keeps UI usable even when GLB has no anchors).
-    const socketObj = findFirstByName(base, [
+    const candidateNames = [
       ...(Array.isArray(socketCandidates) ? socketCandidates : []),
       ...anchorCandidatesByType(type, cacheKey)
-    ]);
+    ];
+    const presetMap = anchorPresetByNameRef.current;
+    const presetCategoryMap = anchorPresetByCategoryRef.current;
+    let preset = null;
+    let presetMatch = '';
+    for (const cand of candidateNames) {
+      const key = normalizeAnchorKeyLoose(cand || '');
+      if (!key) continue;
+      if (!presetMap.has(key)) continue;
+      preset = presetMap.get(key);
+      presetMatch = 'name';
+      break;
+    }
+    if (!preset) {
+      const derived = new Set();
+      derived.add(canonicalAnchorCategory(cacheKey));
+      derived.add(canonicalAnchorCategory(type));
+      derived.add(canonicalAnchorCategory(String(cacheKey).split(':')[0]));
+      for (const cand of candidateNames) derived.add(canonicalAnchorCategory(cand));
+      derived.delete('');
+      for (const k of derived.values()) {
+        if (!presetCategoryMap.has(k)) continue;
+        preset = presetCategoryMap.get(k);
+        presetMatch = 'category';
+        break;
+      }
+    }
+    const socketObj = preset ? null : findFirstByName(base, candidateNames);
     const anchor = new Object3D();
     anchor.name = `${cacheKey.replaceAll(':', '_')}_anchor`;
     anchor.userData = { ...(anchor.userData || {}), hasSocket: Boolean(socketObj), fallback: '' };
 
-    if (socketObj) {
+    if (preset) {
+      const pos = Array.isArray(preset?.position) ? preset.position : [0, 0, 0];
+      const rot = Array.isArray(preset?.rotation) ? preset.rotation : [0, 0, 0];
+      anchor.position.set(clampNum(pos[0]), clampNum(pos[1]), clampNum(pos[2]));
+      anchor.rotation.set(
+        MathUtils.degToRad(clampNum(rot[0])),
+        MathUtils.degToRad(clampNum(rot[1])),
+        MathUtils.degToRad(clampNum(rot[2]))
+      );
+      anchor.userData = {
+        ...(anchor.userData || {}),
+        hasSocket: true,
+        fallback: 'preset',
+        presetMatch,
+        presetName: String(preset?.name || '').trim()
+      };
+    } else if (socketObj) {
       base.updateWorldMatrix(true, true);
       root.updateWorldMatrix(true, true);
       socketObj.updateWorldMatrix(true, false);
@@ -1236,6 +1314,7 @@ const Scene = ({
   carModelUrl,
   color,
   paintTargets,
+  anchorPreset,
   slots,
   embeddedConfig,
   accessoryColors,
@@ -1393,6 +1472,7 @@ const Scene = ({
             url={carModelUrl}
             color={color}
             paintTargets={paint?.targets}
+            anchorPreset={anchorPreset}
             slots={slots}
             embeddedConfig={embeddedConfig}
             accessoryColors={accessoryColors}
@@ -1424,6 +1504,7 @@ const CarViewer = ({
   color,
   paintTargets,
   accessoryColors,
+  anchorPreset,
   onCarMeta,
   onHoverPart,
   onCamera,
@@ -1490,6 +1571,7 @@ const CarViewer = ({
             color={color}
             paintTargets={paintTargets}
             accessoryColors={accessoryColors}
+            anchorPreset={Array.isArray(anchorPreset) ? anchorPreset : []}
             slots={slots}
             embeddedConfig={embeddedConfig}
             onCarMeta={onCarMeta}

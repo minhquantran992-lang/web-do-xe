@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { requestReset } from '../services/api/auth.js';
 import { useI18n } from '../services/i18n.jsx';
+import { validateEmail } from '../services/validation.js';
 
 const ForgotPassword = () => {
   const nav = useNavigate();
@@ -23,11 +24,16 @@ const ForgotPassword = () => {
   const onSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const checked = validateEmail(email);
+    if (!checked.ok) {
+      setError(checked.error);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await requestReset({ email });
+      const data = await requestReset({ email: checked.value });
       setResetUrl(String(data?.resetUrl || '').trim());
-      nav(`/reset-password?email=${encodeURIComponent(String(email || '').trim())}`, { replace: true });
+      nav(`/reset-password?email=${encodeURIComponent(String(checked.value || '').trim())}`, { replace: true });
     } catch (err) {
       const msg = err?.message || 'REQUEST_FAILED';
       if (msg === 'EMAIL_NOT_FOUND') {

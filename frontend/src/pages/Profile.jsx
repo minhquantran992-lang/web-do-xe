@@ -3,6 +3,7 @@ import { useAuth } from '../services/auth/AuthContext.jsx';
 import { getMe, updateMe, uploadMyAvatar } from '../services/api/auth.js';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
+import { validateHumanName } from '../services/validation.js';
 
 const resolveUploadUrl = (url) => {
   const API_BASE_URL = getApiBaseUrl();
@@ -137,11 +138,16 @@ const Profile = () => {
     setSaving(true);
     setError('');
     try {
+      const checkedName = validateHumanName(name);
+      if (!checkedName.ok) {
+        setError(checkedName.error);
+        return;
+      }
       const maxDay = daysInMonth(dobYear, dobMonth);
       const safeDay = dobDay && Number(dobDay) > maxDay ? String(maxDay).padStart(2, '0') : dobDay;
       const dobValue = dobYear && dobMonth && safeDay ? `${dobYear}-${dobMonth}-${safeDay}` : null;
       const payload = {
-        name,
+        name: checkedName.value,
         dob: dobValue,
         gender: gender || '',
         country

@@ -63,7 +63,7 @@ const Dashboard = () => {
   const formatTime = (date) => {
     const d = new Date(date);
     if (Number.isNaN(d.getTime())) return '--:--';
-    return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(d);
+    return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
   };
 
   const todayDateLabel = useMemo(() => {
@@ -306,17 +306,21 @@ const Dashboard = () => {
                             ? 'border-amber-400/20 bg-amber-500/10 shadow-[0_14px_40px_-22px_rgba(251,191,36,0.45)]'
                             : 'border-sky-400/20 bg-sky-500/10 shadow-[0_14px_40px_-22px_rgba(56,189,248,0.55)]';
                         const badge = status === 'in_progress' ? t('seller_status_in_progress') : t('seller_status_accepted');
+                        const shortBadge = badge === t('seller_status_in_progress') ? 'Thi công' : badge;
                         return (
                           <div key={e.id} className={cx('absolute rounded-2xl border px-3 py-2', tone)} style={{ top, left, width, height }}>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="truncate text-xs font-black text-zinc-50">{formatTime(e.start)}</div>
-                                <div className="mt-1 truncate text-[11px] font-semibold text-zinc-200">{customer}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="shrink-0 rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-black tabular-nums text-zinc-50">
+                                {formatTime(e.start)}
                               </div>
-                              <div className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-zinc-200">
-                                {badge}
+                              <div
+                                className="min-w-0 flex-1 truncate rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-zinc-200"
+                                title={badge}
+                              >
+                                {shortBadge}
                               </div>
                             </div>
+                            <div className="mt-1 truncate text-[11px] font-semibold text-zinc-200">{customer}</div>
                           </div>
                         );
                       })}

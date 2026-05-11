@@ -22,6 +22,15 @@ const listCars = asyncHandler(async (req, res) => {
     engineCc: Number.isFinite(c.engineCc) ? c.engineCc : c.engineCc ?? null,
     image: c.image || c.thumbnailUrl || '',
     model3d: c.model3d || c.modelUrl || '',
+    anchors: Array.isArray(c.anchors)
+      ? c.anchors.map((a) => ({
+          id: String(a?.id || '').trim(),
+          name: String(a?.name || '').trim(),
+          category: String(a?.category || '').trim(),
+          position: Array.isArray(a?.position) ? a.position.slice(0, 3).map((x) => Number(x)) : [0, 0, 0],
+          rotation: Array.isArray(a?.rotation) ? a.rotation.slice(0, 3).map((x) => Number(x)) : [0, 0, 0]
+        }))
+      : [],
     combos: Array.isArray(c.combos)
       ? c.combos.map((x) => ({
           key: String(x?.key || '').trim(),

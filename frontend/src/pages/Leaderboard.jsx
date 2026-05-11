@@ -151,14 +151,6 @@ const Leaderboard = () => {
             <h1 className="text-2xl font-semibold">{t('leaderboard_title')}</h1>
             <div className="mt-1 text-sm text-zinc-400">{t('leaderboard_subtitle')}</div>
           </div>
-          <div className="flex items-center gap-3">
-            <Link to="/builds" className="text-sm text-zinc-300 hover:text-zinc-100">
-              {t('builds_title')}
-            </Link>
-            <Link to="/" className="text-sm text-sky-300 hover:text-sky-200">
-              {t('common_back_home')}
-            </Link>
-          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">

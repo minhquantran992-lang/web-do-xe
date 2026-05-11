@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { resetByCode, resetPassword } from '../services/api/auth.js';
 import { useI18n } from '../services/i18n.jsx';
+import { validateEmail } from '../services/validation.js';
 
 const ResetPassword = () => {
   const nav = useNavigate();
@@ -82,15 +83,16 @@ const ResetPassword = () => {
       if (token) {
         await resetPassword({ token, newPassword: password });
       } else {
-        if (!String(email || '').trim()) {
-          setError('MISSING_EMAIL');
+        const checked = validateEmail(email);
+        if (!checked.ok) {
+          setError(checked.error);
           return;
         }
         if (String(code || '').trim().length !== 6) {
           setError('INVALID_CODE');
           return;
         }
-        await resetByCode({ email, code, newPassword: password });
+        await resetByCode({ email: checked.value, code, newPassword: password });
       }
       setDone(true);
       setTimeout(() => nav('/login'), 1200);
