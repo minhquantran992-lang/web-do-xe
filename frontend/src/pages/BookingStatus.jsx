@@ -234,7 +234,21 @@ const BookingStatusInner = () => {
     };
   }, [id, isAuthed, token]);
 
-  const status = String(item?.status || '').toLowerCase();
+  const legacyStatus = String(item?.status || '').toLowerCase();
+  const projectStatus = String(item?.projectStatus || '').trim().toUpperCase();
+  const status = (() => {
+    if (!projectStatus) return legacyStatus;
+    if (projectStatus === 'WAITING_SHOP_RESPONSE') return 'pending';
+    if (projectStatus === 'WAITING_USER_CONFIRMATION') return 'quoted';
+    if (projectStatus === 'WAITING_PRODUCTION') return 'accepted';
+    if (projectStatus === 'IN_PROGRESS') return 'in_progress';
+    if (projectStatus === 'COMPLETED') return 'completed';
+    if (projectStatus === 'SHOP_REJECTED') return 'rejected';
+    if (projectStatus === 'USER_REJECTED_QUOTE') return 'cancelled';
+    if (projectStatus === 'CANCELLED') return 'cancelled';
+    if (projectStatus === 'DISPUTED') return 'completed';
+    return legacyStatus;
+  })();
   const isHandoverAccepted = Boolean(item?.handoverAcceptedAt);
   const shop = item?.shop || null;
   const snapshot = item?.snapshot || null;
@@ -365,6 +379,7 @@ const BookingStatusInner = () => {
       if (code === 'BOOKING_NOT_COMPLETED') setComplaintError('Booking chưa ở trạng thái hoàn thành.');
       else if (code === 'EVIDENCE_REQUIRED') setComplaintError('Thiếu bằng chứng. Vui lòng tải ít nhất 1 ảnh/video.');
       else if (code === 'TICKET_ALREADY_ACTIVE') setComplaintError('Booking này đang có khiếu nại đang xử lý.');
+      else if (code === 'INVALID_ID') setComplaintError('Mã ID sai.');
       else setComplaintError(code || 'TẠO_KHIẾU_NẠI_THẤT_BẠI');
     } finally {
       setComplaintBusy(false);
@@ -563,7 +578,7 @@ const BookingStatusInner = () => {
     } catch (e) {
       const msg = String(e?.message || 'REROUTE_FAILED');
       if (msg === 'SHOP_NOT_ACCEPTING') {
-        setReroute({ busy: false, error: 'Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.' });
+        setReroute({ busy: false, error: 'Shop hiện tại đang tạm ngưng.' });
       } else
       if (msg === 'SHOP_CLOSED_TODAY') {
         setReroute({ busy: false, error: 'Hôm nay shop không làm việc. Vui lòng chọn ngày khác.' });
@@ -674,19 +689,43 @@ const BookingStatusInner = () => {
           : status === 'quoted'
             ? 1
             : 0;
-  const bookingTimeline = [
-    { at: item?.createdAt || null, title: 'Đã tạo yêu cầu' },
-    { at: item?.quotedAt || null, title: 'Shop đã báo giá' },
-    { at: item?.confirmedAt || null, title: 'Bạn đã xác nhận thi công' },
-    { at: item?.cancelledAt || null, title: 'Bạn đã từ chối thi công' },
-    { at: item?.respondedAt || null, title: 'Shop đã nhận yêu cầu' },
-    { at: item?.startedAt || null, title: 'Bắt đầu thi công' },
-    { at: item?.completedAt || null, title: 'Hoàn tất' },
-    { at: item?.rejectedAt || null, title: 'Shop từ chối' },
-    { at: item?.expiredAt || null, title: 'Hết hạn' }
-  ]
-    .filter((e) => e.at)
-    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  const bookingTimeline = (() => {
+    const rows = Array.isArray(item?.history) ? item.history : [];
+    if (rows.length) {
+      const titleOf = (h) => {
+        const from = String(h?.fromStatus || '').trim().toLowerCase();
+        const to = String(h?.toStatus || '').trim().toLowerCase();
+        const note = String(h?.note || '').trim();
+        if (from === 'accepted' && to === 'accepted' && note.toLowerCase().includes('dời lịch')) return 'Dời lịch';
+        if (to === 'pending') return 'Đã tạo yêu cầu';
+        if (to === 'quoted') return 'Shop đã báo giá';
+        if (to === 'accepted') return 'Bạn đã xác nhận thi công';
+        if (to === 'cancelled') return 'Bạn đã từ chối thi công';
+        if (to === 'rejected') return 'Shop từ chối';
+        if (to === 'in_progress') return 'Bắt đầu thi công';
+        if (to === 'completed') return 'Hoàn tất';
+        if (to === 'expired') return 'Hết hạn';
+        return to ? to.replaceAll('_', ' ') : 'Cập nhật';
+      };
+      return rows
+        .map((h) => ({ at: h?.happenedAt || null, title: titleOf(h) }))
+        .filter((e) => e.at)
+        .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    }
+    return [
+      { at: item?.createdAt || null, title: 'Đã tạo yêu cầu' },
+      { at: item?.quotedAt || null, title: 'Shop đã báo giá' },
+      { at: item?.confirmedAt || null, title: 'Bạn đã xác nhận thi công' },
+      { at: item?.cancelledAt || null, title: 'Bạn đã từ chối thi công' },
+      { at: item?.respondedAt || null, title: 'Shop đã nhận yêu cầu' },
+      { at: item?.startedAt || null, title: 'Bắt đầu thi công' },
+      { at: item?.completedAt || null, title: 'Hoàn tất' },
+      { at: item?.rejectedAt || null, title: 'Shop từ chối' },
+      { at: item?.expiredAt || null, title: 'Hết hạn' }
+    ]
+      .filter((e) => e.at)
+      .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  })();
   const headline =
     status === 'completed'
       ? 'Dịch vụ đã hoàn thành'

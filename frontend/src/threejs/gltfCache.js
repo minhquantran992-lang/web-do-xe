@@ -10,7 +10,8 @@ export const resolveModelUrl = (url) => {
   const u = String(url || '').trim();
   if (!u) return '';
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
-  if (u.startsWith('/')) return `${API_BASE_URL}${u}`;
+  if (u.startsWith('/uploads/')) return `${API_BASE_URL}${u}`;
+  if (u.startsWith('/')) return u;
   return `${API_BASE_URL}/${u}`;
 };
 

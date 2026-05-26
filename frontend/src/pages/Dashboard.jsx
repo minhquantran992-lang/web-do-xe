@@ -173,7 +173,7 @@ const Dashboard = () => {
     const s = String(style || '').toLowerCase();
     if (s === 'track') return { label: 'TRACK', cls: 'border-sky-500/25 bg-sky-500/10 text-sky-200' };
     if (s === 'touring') return { label: 'TOURING', cls: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200' };
-    return { label: 'STREET', cls: 'border-white/10 bg-white/5 text-zinc-200' };
+    return { label: 'STREET', cls: 'border-sky-500/25 bg-sky-500/10 text-sky-200' };
   };
 
   return (
@@ -241,7 +241,7 @@ const Dashboard = () => {
 
               {error ? (
                 <div className="mt-6 rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">
-                  {error}
+                  {t(error)}
                 </div>
               ) : null}
             </div>

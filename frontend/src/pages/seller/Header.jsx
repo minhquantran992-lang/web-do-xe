@@ -39,6 +39,7 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
   const [chatOpen, setChatOpen] = useState(false);
   const [chatUserId, setChatUserId] = useState('');
   const [deletingThreadId, setDeletingThreadId] = useState('');
+  const [accountOpen, setAccountOpen] = useState(false);
   const initials = useMemo(() => {
     const s = String(userName || '').trim() || 'V';
     const parts = s.split(' ').filter(Boolean);
@@ -57,6 +58,15 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
       localStorage.setItem('carbanana.vendor.mode', 'user');
     } catch {}
     nav('/dashboard', { replace: true });
+  };
+
+  const doLogout = () => {
+    try {
+      sessionStorage.removeItem('post_auth_redirect');
+    } catch {}
+    setAccountOpen(false);
+    logout();
+    nav('/login', { replace: true });
   };
 
   const fetchMyShop = async () => {
@@ -223,6 +233,15 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
     return () => window.removeEventListener('keydown', onKey);
   }, [chatPanelOpen, vendorId]);
 
+  useEffect(() => {
+    if (!accountOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setAccountOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [accountOpen]);
+
   const translateAcceptingError = (code) => {
     const c = String(code || '').trim();
     if (c === 'UNAUTHORIZED') return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
@@ -368,41 +387,69 @@ const Header = ({ onOpenSidebar, userName = 'Vendor', shopName = 'Seller Center'
             ) : null}
           </button>
 
-          {canSwitchToUser ? (
+          <div className="relative">
             <button
               type="button"
-              onClick={switchToUserMode}
-              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10"
+              onClick={() => setAccountOpen((v) => !v)}
+              className={cx(
+                'inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10',
+                accountOpen ? 'ring-2 ring-sky-400/25' : ''
+              )}
+              aria-label={t('seller_header_account')}
+              aria-expanded={accountOpen ? 'true' : 'false'}
             >
-              Quay về tài khoản thường
+              <div className="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/5 text-xs font-black text-zinc-100">
+                {initials}
+              </div>
+              <div className="hidden min-w-0 text-left md:block">
+                <div className="truncate text-xs font-semibold text-zinc-100">{userName}</div>
+                <div className="truncate text-[11px] text-zinc-400">{t('seller_header_account')}</div>
+              </div>
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className={cx('text-zinc-400 transition', accountOpen ? 'rotate-180' : '')}
+              >
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
-          ) : null}
 
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                sessionStorage.removeItem('post_auth_redirect');
-              } catch {}
-              logout();
-              nav('/login', { replace: true });
-            }}
-            className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-white/10"
-          >
-            {t('seller_header_logout')}
-          </button>
-
-          <div className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 md:flex">
-            <div className="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/5 text-xs font-black text-zinc-100">
-              {initials}
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-xs font-semibold text-zinc-100">{userName}</div>
-              <div className="truncate text-[11px] text-zinc-400">{t('seller_header_account')}</div>
-            </div>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-400">
-              <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            {accountOpen ? (
+              <>
+                <button type="button" className="fixed inset-0 z-[70] cursor-default" onClick={() => setAccountOpen(false)} aria-label="Close" />
+                <div className="absolute right-0 top-[calc(100%+10px)] z-[75] w-[min(280px,calc(100vw-32px))] overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-2xl shadow-black/60 backdrop-blur-2xl">
+                  <div className="px-4 py-3">
+                    <div className="truncate text-sm font-black text-zinc-50">{userName}</div>
+                    <div className="truncate text-xs text-zinc-400">{String(user?.email || '').trim() || t('seller_header_account')}</div>
+                  </div>
+                  <div className="border-t border-white/10">
+                    {canSwitchToUser ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAccountOpen(false);
+                          switchToUserMode();
+                        }}
+                        className="block w-full px-4 py-3 text-left text-sm font-semibold text-zinc-100 hover:bg-white/5"
+                      >
+                        Quay về tài khoản thường
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={doLogout}
+                      className="block w-full px-4 py-3 text-left text-sm font-semibold text-red-200 hover:bg-red-500/10"
+                    >
+                      {t('seller_header_logout')}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
       </div>

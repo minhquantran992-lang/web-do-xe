@@ -505,6 +505,7 @@ const Register = () => {
   const identifierValid = Boolean(checkedIdentifier?.ok);
   const safeIdentifier = checkedIdentifier?.ok ? checkedIdentifier.value : String(identifier || '').trim();
   const checkedName = useMemo(() => validateHumanName(fullName), [fullName]);
+  const showNameWarning = Boolean(String(lastName || '').trim() && String(firstName || '').trim() && !checkedName.ok);
   const canStep1 = Boolean(
     checkedName.ok &&
       String(dobYear || '').trim() &&
@@ -780,7 +781,7 @@ const Register = () => {
                     </div>
                     {triedStep1 && (!String(lastName || '').trim() || !String(firstName || '').trim()) ? (
                       <div className="mt-2 text-sm text-red-300">{t('register_error_fullname_required')}</div>
-                    ) : triedStep1 && String(lastName || '').trim() && String(firstName || '').trim() && !checkedName.ok ? (
+                    ) : showNameWarning ? (
                       <div className="mt-2 text-sm text-red-300">{checkedName.error}</div>
                     ) : null}
                   </div>

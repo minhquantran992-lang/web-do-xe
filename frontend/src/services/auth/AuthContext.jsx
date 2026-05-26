@@ -5,15 +5,87 @@ const STORAGE_KEY = 'carbanana_auth';
 
 const AuthContext = createContext(null);
 
-const readStoredAuth = () => {
+const safeJsonParse = (raw) => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    return JSON.parse(String(raw || ''));
+  } catch {
+    return null;
+  }
+};
+
+const decodeJwtPayload = (token) => {
+  const t = String(token || '').trim();
+  if (!t) return null;
+  const parts = t.split('.');
+  if (parts.length < 2) return null;
+  const raw = String(parts[1] || '');
+  const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=');
+  try {
+    const json = atob(padded);
+    return safeJsonParse(json);
+  } catch {
+    try {
+      const json = decodeURIComponent(
+        atob(padded)
+          .split('')
+          .map((c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
+          .join('')
+      );
+      return safeJsonParse(json);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
+
+const validateAuth = ({ token, user }) => {
+  const t = token || null;
+  const u = user || null;
+  if (!t || !u) return { token: null, user: null };
+  const payload = decodeJwtPayload(t);
+  if (!payload) return { token: t, user: u };
+  const sub = String(payload?.sub || '').trim();
+  const email = normalizeEmail(payload?.email);
+  const userId = String(u?.id || u?._id || '').trim();
+  const userEmail = normalizeEmail(u?.email);
+  if (sub && userId && sub !== userId) return { token: null, user: null };
+  if (email && userEmail && email !== userEmail) return { token: null, user: null };
+  return { token: t, user: u };
+};
+
+const readFromStorage = (storage) => {
+  try {
+    const raw = storage?.getItem(STORAGE_KEY);
     if (!raw) return { token: null, user: null };
-    const parsed = JSON.parse(raw);
+    const parsed = safeJsonParse(raw);
     return { token: parsed?.token || null, user: parsed?.user || null };
   } catch {
     return { token: null, user: null };
   }
+};
+
+const writeToStorage = (storage, next) => {
+  try {
+    storage?.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {}
+};
+
+const clearStorage = (storage) => {
+  try {
+    storage?.removeItem(STORAGE_KEY);
+  } catch {}
+};
+
+const readStoredAuth = () => {
+  const fromSession = validateAuth(readFromStorage(sessionStorage));
+  if (fromSession.token) return fromSession;
+
+  const fromLocal = validateAuth(readFromStorage(localStorage));
+  if (fromLocal.token) writeToStorage(sessionStorage, fromLocal);
+  return fromLocal;
 };
 
 export const AuthProvider = ({ children }) => {
@@ -27,7 +99,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const persist = useCallback((next) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeToStorage(sessionStorage, next);
+    writeToStorage(localStorage, next);
   }, []);
 
   const setAuth = useCallback(({ token: nextToken, user: nextUser }) => {
@@ -39,7 +112,8 @@ export const AuthProvider = ({ children }) => {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
+    clearStorage(sessionStorage);
+    clearStorage(localStorage);
   }, []);
 
   useEffect(() => {

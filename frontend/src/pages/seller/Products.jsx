@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, getApiBaseUrl } from '../../services/api/client.js';
 import { useAuth } from '../../services/auth/AuthContext.jsx';
 import { useI18n } from '../../services/i18n.jsx';
-import { isInappropriateText, validatePhone } from '../../services/validation.js';
+import { humanizeImageUploadError, isInappropriateText, validatePhone } from '../../services/validation.js';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -54,6 +54,8 @@ const ShopProfile = ({ onSaved }) => {
     maxSlots: '3',
     mechanicCount: '1'
   });
+  const logoPickerRef = useRef(null);
+  const coverPickerRef = useRef(null);
 
   useEffect(() => {
     if (!token) return;
@@ -96,6 +98,24 @@ const ShopProfile = ({ onSaved }) => {
   }, [token]);
 
   const canSave = useMemo(() => Boolean(String(form.shopName || '').trim()), [form.shopName]);
+
+  const uploadShopImage = async (file) => {
+    if (!token || !file) return '';
+    const base = getApiBaseUrl();
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${base}/api/vendor/shop/upload-image`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = data?.error || 'UPLOAD_FAILED';
+      throw new Error(msg);
+    }
+    return String(data?.url || '').trim();
+  };
 
   const save = async () => {
     if (!token || saving || !canSave) return;
@@ -323,24 +343,123 @@ const ShopProfile = ({ onSaved }) => {
                   Cảnh báo: số thợ ít so với số slot (không chặn đặt lịch).
                 </div>
               ) : null}
-              <label className="space-y-1">
-                <div className="text-xs font-semibold text-zinc-400">{t('shop_logo_url')}</div>
+              <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold text-zinc-400">{t('shop_logo_url')}</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => logoPickerRef.current?.click()}
+                      className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-zinc-100 hover:bg-white/10"
+                    >
+                      Chọn file
+                    </button>
+                    {form.logo ? (
+                      <button
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, logo: '' }))}
+                        className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/15"
+                      >
+                        Xoá
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+                    {resolveAssetUrl(form.logo) ? <img alt="" src={resolveAssetUrl(form.logo)} className="h-full w-full object-cover" /> : null}
+                  </div>
+                  <input
+                    value={form.logo}
+                    onChange={(e) => setForm((p) => ({ ...p, logo: e.target.value }))}
+                    placeholder="https://… hoặc /uploads/…"
+                    className="w-full flex-1 rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                  />
+                </div>
+
                 <input
-                  value={form.logo}
-                  onChange={(e) => setForm((p) => ({ ...p, logo: e.target.value }))}
-                  placeholder="https://…"
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                  ref={logoPickerRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setError('');
+                    try {
+                      const url = await uploadShopImage(file);
+                      setForm((p) => ({ ...p, logo: url }));
+                    } catch (err) {
+                      setError(humanizeImageUploadError(err));
+                    } finally {
+                      e.target.value = '';
+                    }
+                  }}
+                  className="hidden"
                 />
-              </label>
-              <label className="space-y-1">
-                <div className="text-xs font-semibold text-zinc-400">{t('shop_cover_url')}</div>
+                <div className="text-[11px] font-semibold text-zinc-500">PNG/JPG/WEBP • tối đa 10MB</div>
+                <div className="text-[11px] font-semibold text-zinc-500">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
+              </div>
+
+              <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold text-zinc-400">{t('shop_cover_url')}</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => coverPickerRef.current?.click()}
+                      className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-zinc-100 hover:bg-white/10"
+                    >
+                      Chọn file
+                    </button>
+                    {form.coverImage ? (
+                      <button
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, coverImage: '' }))}
+                        className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/15"
+                      >
+                        Xoá
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-16 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+                    {resolveAssetUrl(form.coverImage) ? (
+                      <img alt="" src={resolveAssetUrl(form.coverImage)} className="h-full w-full object-cover" />
+                    ) : null}
+                  </div>
+                  <input
+                    value={form.coverImage}
+                    onChange={(e) => setForm((p) => ({ ...p, coverImage: e.target.value }))}
+                    placeholder="https://… hoặc /uploads/…"
+                    className="w-full flex-1 rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                  />
+                </div>
+
                 <input
-                  value={form.coverImage}
-                  onChange={(e) => setForm((p) => ({ ...p, coverImage: e.target.value }))}
-                  placeholder="https://…"
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                  ref={coverPickerRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setError('');
+                    try {
+                      const url = await uploadShopImage(file);
+                      setForm((p) => ({ ...p, coverImage: url }));
+                    } catch (err) {
+                      setError(humanizeImageUploadError(err));
+                    } finally {
+                      e.target.value = '';
+                    }
+                  }}
+                  className="hidden"
                 />
-              </label>
+                <div className="text-[11px] font-semibold text-zinc-500">PNG/JPG/WEBP • tối đa 10MB</div>
+                <div className="text-[11px] font-semibold text-zinc-500">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
+              </div>
             </div>
 
             <button

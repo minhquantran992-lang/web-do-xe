@@ -8,12 +8,15 @@ const { createNotification } = require('../services/notifications');
 const MAIN_FLOW = ['REQUESTED', 'QUOTED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
 const STATUS_LABEL = {
   REQUESTED: 'Yêu cầu báo giá',
+  SHOP_REJECTED: 'Shop từ chối nhận',
   QUOTED: 'Đã có báo giá (chờ khách xác nhận)',
   REJECTED: 'Khách từ chối báo giá',
   CANCELLED: 'Đơn bị hủy',
   CONFIRMED: 'Khách đã xác nhận (chờ thi công)',
   IN_PROGRESS: 'Đang thi công',
-  COMPLETED: 'Hoàn tất'
+  QUALITY_CHECK: 'Kiểm tra hoàn thiện',
+  COMPLETED: 'Hoàn tất',
+  DISPUTED: 'Tranh chấp'
 };
 
 const normalizeText = (v, maxLen = 1000) => String(v || '').trim().slice(0, maxLen);
@@ -26,6 +29,38 @@ const statusIndex = (s) => {
 const quoteTimeoutHours = () => {
   const raw = Number(process.env.ORDER_QUOTE_TIMEOUT_HOURS || process.env.QUOTE_TIMEOUT_HOURS || 24);
   return Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 24;
+};
+
+const PROJECT_STATUS = Object.freeze({
+  DESIGN_DRAFT: 'DESIGN_DRAFT',
+  DESIGN_SUBMITTED: 'DESIGN_SUBMITTED',
+  WAITING_SHOP_RESPONSE: 'WAITING_SHOP_RESPONSE',
+  SHOP_REJECTED: 'SHOP_REJECTED',
+  QUOTE_SENT: 'QUOTE_SENT',
+  WAITING_USER_CONFIRMATION: 'WAITING_USER_CONFIRMATION',
+  USER_REJECTED_QUOTE: 'USER_REJECTED_QUOTE',
+  QUOTE_CONFIRMED: 'QUOTE_CONFIRMED',
+  WAITING_PRODUCTION: 'WAITING_PRODUCTION',
+  IN_PROGRESS: 'IN_PROGRESS',
+  QUALITY_CHECK: 'QUALITY_CHECK',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  DISPUTED: 'DISPUTED'
+});
+
+const mapOrderToProjectStatus = (order) => {
+  const status = String(order?.status || '').trim().toUpperCase();
+  if (status === 'REQUESTED') return { status: PROJECT_STATUS.WAITING_SHOP_RESPONSE };
+  if (status === 'SHOP_REJECTED') return { status: PROJECT_STATUS.SHOP_REJECTED };
+  if (status === 'QUOTED') return { status: PROJECT_STATUS.WAITING_USER_CONFIRMATION };
+  if (status === 'REJECTED') return { status: PROJECT_STATUS.USER_REJECTED_QUOTE };
+  if (status === 'CONFIRMED') return { status: PROJECT_STATUS.WAITING_PRODUCTION };
+  if (status === 'IN_PROGRESS') return { status: PROJECT_STATUS.IN_PROGRESS };
+  if (status === 'QUALITY_CHECK') return { status: PROJECT_STATUS.QUALITY_CHECK };
+  if (status === 'COMPLETED') return { status: PROJECT_STATUS.COMPLETED };
+  if (status === 'CANCELLED') return { status: PROJECT_STATUS.CANCELLED };
+  if (status === 'DISPUTED') return { status: PROJECT_STATUS.DISPUTED };
+  return { status: PROJECT_STATUS.WAITING_SHOP_RESPONSE };
 };
 
 const logEvent = async ({ orderId, fromStatus, toStatus, actorRole, actorId, note, imageUrl, at }) => {
@@ -66,6 +101,7 @@ const listVendorOrders = asyncHandler(async (req, res) => {
     items: (Array.isArray(items) ? items : []).map((o) => ({
       _id: o._id,
       status: String(o.status || ''),
+      projectStatus: mapOrderToProjectStatus(o).status,
       currentStepIndex: statusIndex(o.status),
       quotedPrice: o.quotedPrice ?? null,
       quotedAt: o.quotedAt || null,
@@ -111,6 +147,7 @@ const getVendorOrderDetail = asyncHandler(async (req, res) => {
     item: {
       _id: order._id,
       status: String(order.status || ''),
+      projectStatus: mapOrderToProjectStatus(order).status,
       currentStepIndex: statusIndex(order.status),
       quotedPrice: order.quotedPrice ?? null,
       quoteNote: String(order.quoteNote || ''),
@@ -190,6 +227,54 @@ const quoteOrder = asyncHandler(async (req, res) => {
         type: 'ORDER_QUOTED',
         content: `Shop đã gửi báo giá: ${Math.round(price)}đ`,
         meta: { orderId: id, quotedPrice: price, quoteExpiresAt: exp.toISOString() }
+      });
+    }
+  } catch {}
+
+  res.json({ ok: true });
+});
+
+const rejectOrder = asyncHandler(async (req, res) => {
+  const vendorId = String(req.vendor?._id || '').trim();
+  const id = String(req.params?.id || '').trim();
+  if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
+
+  const reasonRaw = normalizeText(req.body?.reason || req.body?.note || '', 500);
+  const reason = reasonRaw.length > 500 ? reasonRaw.slice(0, 500) : reasonRaw;
+  if (!reason || reason.length < 3) return res.status(400).json({ error: 'REASON_REQUIRED' });
+
+  const order = await Order.findOne({ _id: id, shopId: new mongoose.Types.ObjectId(vendorId) }).lean();
+  if (!order) return res.status(404).json({ error: 'NOT_FOUND' });
+  const status = String(order.status || '');
+  if (status !== 'REQUESTED') return res.status(409).json({ error: 'INVALID_TRANSITION' });
+
+  const now = new Date();
+  const upd = await Order.updateOne(
+    { _id: new mongoose.Types.ObjectId(id), shopId: new mongoose.Types.ObjectId(vendorId), status: 'REQUESTED' },
+    { $set: { status: 'SHOP_REJECTED', rejectedAt: now, cancelReason: reason } }
+  );
+  if (!upd?.modifiedCount) return res.status(409).json({ error: 'CONFLICT' });
+
+  await logEvent({
+    orderId: id,
+    fromStatus: 'REQUESTED',
+    toStatus: 'SHOP_REJECTED',
+    actorRole: 'WORKSHOP',
+    actorId: vendorId,
+    note: reason ? `Từ chối nhận: ${reason}` : 'Từ chối nhận',
+    imageUrl: '',
+    at: now
+  });
+
+  try {
+    const userId = String(order?.userId || '').trim();
+    if (mongoose.isValidObjectId(userId)) {
+      await createNotification({
+        userId,
+        type: 'ORDER_SHOP_REJECTED',
+        content: reason ? `Shop đã từ chối yêu cầu: ${reason}` : 'Shop đã từ chối yêu cầu',
+        meta: { orderId: id, reason }
       });
     }
   } catch {}
@@ -297,4 +382,4 @@ const uploadOrderProof = asyncHandler(async (req, res) => {
   res.status(201).json({ url: `/uploads/order-progress/${file.filename}` });
 });
 
-module.exports = { listVendorOrders, getVendorOrderDetail, quoteOrder, startOrder, completeOrder, uploadOrderProof };
+module.exports = { listVendorOrders, getVendorOrderDetail, quoteOrder, rejectOrder, startOrder, completeOrder, uploadOrderProof };

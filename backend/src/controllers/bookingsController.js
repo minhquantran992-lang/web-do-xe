@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 
 const Booking = require('../models/Booking');
+const BookingProgress = require('../models/BookingProgress');
 const Configuration = require('../models/Configuration');
 const Vendor = require('../models/Vendor');
 const User = require('../models/User');
@@ -69,6 +70,51 @@ const normalizePrice = (n) => {
   const x = Number(n);
   if (!Number.isFinite(x) || x < 0) return 0;
   return Math.round(x * 100) / 100;
+};
+
+const normalizeText = (v, maxLen = 1000) => String(v || '').trim().slice(0, maxLen);
+
+const logBookingEvent = async ({ bookingId, fromStatus, toStatus, actorRole, actorId, note, at }) => {
+  const happenedAt = at instanceof Date ? at : new Date();
+  return BookingProgress.create({
+    bookingId: new mongoose.Types.ObjectId(String(bookingId)),
+    fromStatus: fromStatus ? String(fromStatus) : null,
+    toStatus: String(toStatus || ''),
+    actorRole: String(actorRole || ''),
+    actorId: actorId && mongoose.isValidObjectId(String(actorId)) ? new mongoose.Types.ObjectId(String(actorId)) : null,
+    note: normalizeText(note),
+    happenedAt
+  });
+};
+
+const PROJECT_STATUS = Object.freeze({
+  DESIGN_DRAFT: 'DESIGN_DRAFT',
+  DESIGN_SUBMITTED: 'DESIGN_SUBMITTED',
+  WAITING_SHOP_RESPONSE: 'WAITING_SHOP_RESPONSE',
+  SHOP_REJECTED: 'SHOP_REJECTED',
+  QUOTE_SENT: 'QUOTE_SENT',
+  WAITING_USER_CONFIRMATION: 'WAITING_USER_CONFIRMATION',
+  USER_REJECTED_QUOTE: 'USER_REJECTED_QUOTE',
+  QUOTE_CONFIRMED: 'QUOTE_CONFIRMED',
+  WAITING_PRODUCTION: 'WAITING_PRODUCTION',
+  IN_PROGRESS: 'IN_PROGRESS',
+  QUALITY_CHECK: 'QUALITY_CHECK',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  DISPUTED: 'DISPUTED'
+});
+
+const mapBookingToProjectStatus = (booking) => {
+  const status = String(booking?.status || '').trim().toLowerCase();
+  if (status === 'pending') return { status: PROJECT_STATUS.WAITING_SHOP_RESPONSE };
+  if (status === 'quoted') return { status: PROJECT_STATUS.WAITING_USER_CONFIRMATION };
+  if (status === 'accepted') return { status: PROJECT_STATUS.WAITING_PRODUCTION };
+  if (status === 'in_progress') return { status: PROJECT_STATUS.IN_PROGRESS };
+  if (status === 'completed') return { status: PROJECT_STATUS.COMPLETED };
+  if (status === 'rejected') return { status: PROJECT_STATUS.SHOP_REJECTED };
+  if (status === 'cancelled') return { status: PROJECT_STATUS.USER_REJECTED_QUOTE };
+  if (status === 'expired') return { status: PROJECT_STATUS.SHOP_REJECTED, reason: 'TIMEOUT' };
+  return { status: PROJECT_STATUS.WAITING_SHOP_RESPONSE };
 };
 
 const formatVnd = (value) => {
@@ -450,6 +496,10 @@ const createBooking = asyncHandler(async (req, res) => {
   });
 
   try {
+    await logBookingEvent({ bookingId: doc._id, fromStatus: null, toStatus: 'pending', actorRole: 'USER', actorId: userId, note: 'Tạo yêu cầu', at: now });
+  } catch {}
+
+  try {
     const warningList = Array.isArray(snapshot?.legalWarnings) ? snapshot.legalWarnings.map((x) => String(x || '').trim()).filter(Boolean) : [];
     if (warningList.length) {
       const title = String(snapshot?.buildName || snapshot?.carName || '').trim() || buildId;
@@ -546,6 +596,8 @@ const createBooking = asyncHandler(async (req, res) => {
       shopId: doc.shopId,
       timeSlot: doc.timeSlot,
       status: doc.status,
+      projectStatus: mapBookingToProjectStatus(doc).status,
+      projectStatusReason: mapBookingToProjectStatus(doc).reason || '',
       createdAt: doc.createdAt,
       expiresAt: doc.expiresAt,
       snapshot: doc.snapshot,
@@ -566,9 +618,10 @@ const getMyBooking = asyncHandler(async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
   if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
 
-  const item = await Booking.findOne({ _id: id, userId })
-    .populate('shopId', 'shopName address email phone logo coverImage')
-    .lean();
+  const [item, history] = await Promise.all([
+    Booking.findOne({ _id: id, userId }).populate('shopId', 'shopName address email phone logo coverImage').lean(),
+    BookingProgress.find({ bookingId: new mongoose.Types.ObjectId(id) }).sort({ happenedAt: -1, createdAt: -1 }).lean()
+  ]);
   if (!item) return res.status(404).json({ error: 'NOT_FOUND' });
 
   const shop = item.shopId
@@ -583,7 +636,24 @@ const getMyBooking = asyncHandler(async (req, res) => {
       }
     : null;
 
-  res.json({ item: { ...item, shopId: undefined, shop } });
+  const mapped = mapBookingToProjectStatus(item);
+  res.json({
+    item: {
+      ...item,
+      shopId: undefined,
+      shop,
+      projectStatus: mapped.status,
+      projectStatusReason: mapped.reason || '',
+      history: (Array.isArray(history) ? history : []).map((h) => ({
+        _id: h._id,
+        fromStatus: h.fromStatus ? String(h.fromStatus) : null,
+        toStatus: String(h.toStatus || ''),
+        actorRole: String(h.actorRole || ''),
+        note: String(h.note || ''),
+        happenedAt: h.happenedAt || h.createdAt || null
+      }))
+    }
+  });
 });
 
 const listMyBookings = asyncHandler(async (req, res) => {
@@ -623,6 +693,10 @@ const listMyBookings = asyncHandler(async (req, res) => {
 
   res.json({
     items: visible.map((b) => ({
+      ...(() => {
+        const mapped = mapBookingToProjectStatus(b);
+        return { projectStatus: mapped.status, projectStatusReason: mapped.reason || '' };
+      })(),
       _id: b._id,
       buildId: b.buildId,
       timeSlot: b.timeSlot,
@@ -677,6 +751,10 @@ const confirmMyBooking = asyncHandler(async (req, res) => {
   const updated = await Booking.findById(id).lean();
 
   try {
+    await logBookingEvent({ bookingId: id, fromStatus: 'quoted', toStatus: 'accepted', actorRole: 'USER', actorId: userId, note: 'Khách xác nhận thi công', at: now });
+  } catch {}
+
+  try {
     const [vendor, user] = await Promise.all([
       booking?.shopId ? Vendor.findById(booking.shopId).select('userId shopName').lean() : Promise.resolve(null),
       User.findById(userId).select('name email').lean()
@@ -695,7 +773,8 @@ const confirmMyBooking = asyncHandler(async (req, res) => {
     });
   } catch {}
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const rejectMyBooking = asyncHandler(async (req, res) => {
@@ -721,6 +800,11 @@ const rejectMyBooking = asyncHandler(async (req, res) => {
   const updated = await Booking.findById(id).lean();
 
   try {
+    const noteText = reason ? `Khách từ chối thi công: ${reason}` : 'Khách từ chối thi công';
+    await logBookingEvent({ bookingId: id, fromStatus: 'quoted', toStatus: 'cancelled', actorRole: 'USER', actorId: userId, note: noteText, at: now });
+  } catch {}
+
+  try {
     const [vendor, user] = await Promise.all([
       booking?.shopId ? Vendor.findById(booking.shopId).select('userId shopName').lean() : Promise.resolve(null),
       User.findById(userId).select('name email').lean()
@@ -741,7 +825,8 @@ const rejectMyBooking = asyncHandler(async (req, res) => {
     });
   } catch {}
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const finishMyBooking = asyncHandler(async (req, res) => {
@@ -759,12 +844,15 @@ const finishMyBooking = asyncHandler(async (req, res) => {
 
   if (booking.handoverAcceptedAt) {
     const updated = await Booking.findById(id).lean();
-    return res.json({ item: updated || booking });
+    const base = updated || booking;
+    const mapped = mapBookingToProjectStatus(base);
+    return res.json({ item: { ...base, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
   }
 
   await Booking.updateOne({ _id: id }, { $set: { handoverAcceptedAt: now } });
   const updated = await Booking.findById(id).lean();
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const listVendorBookings = asyncHandler(async (req, res) => {
@@ -782,6 +870,10 @@ const listVendorBookings = asyncHandler(async (req, res) => {
 
   res.json({
     items: items.map((b) => ({
+      ...(() => {
+        const mapped = mapBookingToProjectStatus(b);
+        return { projectStatus: mapped.status, projectStatusReason: mapped.reason || '' };
+      })(),
       _id: b._id,
       buildId: b.buildId,
       timeSlot: b.timeSlot,
@@ -813,11 +905,18 @@ const getVendorBooking = asyncHandler(async (req, res) => {
   if (!vendorId) return res.status(403).json({ error: 'FORBIDDEN' });
   if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'INVALID_ID' });
 
-  const b = await Booking.findOne({ _id: id, shopId: vendorId }).populate('userId', 'name email').lean();
+  const [b, history] = await Promise.all([
+    Booking.findOne({ _id: id, shopId: vendorId }).populate('userId', 'name email').lean(),
+    BookingProgress.find({ bookingId: new mongoose.Types.ObjectId(id) }).sort({ happenedAt: -1, createdAt: -1 }).lean()
+  ]);
   if (!b) return res.status(404).json({ error: 'NOT_FOUND' });
 
   res.json({
     item: {
+      ...(() => {
+        const mapped = mapBookingToProjectStatus(b);
+        return { projectStatus: mapped.status, projectStatusReason: mapped.reason || '' };
+      })(),
       _id: b._id,
       buildId: b.buildId,
       timeSlot: b.timeSlot,
@@ -837,7 +936,15 @@ const getVendorBooking = asyncHandler(async (req, res) => {
       completedAt: b.completedAt || null,
       handoverAcceptedAt: b.handoverAcceptedAt || null,
       snapshot: b.snapshot || null,
-      user: b.userId ? { _id: b.userId._id, name: b.userId.name || '', email: b.userId.email || '' } : null
+      user: b.userId ? { _id: b.userId._id, name: b.userId.name || '', email: b.userId.email || '' } : null,
+      history: (Array.isArray(history) ? history : []).map((h) => ({
+        _id: h._id,
+        fromStatus: h.fromStatus ? String(h.fromStatus) : null,
+        toStatus: String(h.toStatus || ''),
+        actorRole: String(h.actorRole || ''),
+        note: String(h.note || ''),
+        happenedAt: h.happenedAt || h.createdAt || null
+      }))
     }
   });
 });
@@ -1006,7 +1113,8 @@ const acceptBooking = asyncHandler(async (req, res) => {
 
   const quotedPriceRaw = req.body?.quotedPrice ?? req.body?.price ?? req.body?.quotePrice;
   const quotedPrice = quotedPriceRaw === undefined || quotedPriceRaw === null || quotedPriceRaw === '' ? null : Number(quotedPriceRaw);
-  if (quotedPrice !== null && (!Number.isFinite(quotedPrice) || quotedPrice < 0)) return res.status(400).json({ error: 'INVALID_QUOTED_PRICE' });
+  if (quotedPrice === null) return res.status(400).json({ error: 'QUOTE_REQUIRED' });
+  if (!Number.isFinite(quotedPrice) || quotedPrice <= 0) return res.status(400).json({ error: 'INVALID_QUOTED_PRICE' });
   const quoteNote = String(req.body?.quoteNote || req.body?.note || '').trim();
 
   const booking = await Booking.findOne({ _id: id, shopId: vendorId }).lean();
@@ -1018,20 +1126,21 @@ const acceptBooking = asyncHandler(async (req, res) => {
     return res.status(409).json({ error: 'EXPIRED' });
   }
 
-  const patch = { status: quotedPrice !== null ? 'quoted' : 'accepted', respondedAt: now };
+  const patch = { status: 'quoted', respondedAt: now };
   if (nextDate) patch.timeSlot = nextDate;
-  if (quotedPrice !== null) {
-    patch.quotedPrice = quotedPrice;
-    patch.quotedAt = now;
-    patch.quoteNote = quoteNote;
-    patch.confirmedAt = null;
-    patch.cancelledAt = null;
-    patch.cancelReason = '';
-  } else if (quoteNote) {
-    patch.quoteNote = quoteNote;
-  }
+  patch.quotedPrice = quotedPrice;
+  patch.quotedAt = now;
+  patch.quoteNote = quoteNote;
+  patch.confirmedAt = null;
+  patch.cancelledAt = null;
+  patch.cancelReason = '';
   await Booking.updateOne({ _id: id }, { $set: patch });
   const updated = await Booking.findById(id).lean();
+
+  try {
+    const noteText = quoteNote ? `Báo giá: ${Math.round(quotedPrice)} • ${quoteNote}` : `Báo giá: ${Math.round(quotedPrice)}`;
+    await logBookingEvent({ bookingId: id, fromStatus: 'pending', toStatus: 'quoted', actorRole: 'WORKSHOP', actorId: vendorId, note: noteText, at: now });
+  } catch {}
 
   const [vendor, user] = await Promise.all([
     Vendor.findById(vendorId).select('shopName address email phone').lean(),
@@ -1152,7 +1261,8 @@ const acceptBooking = asyncHandler(async (req, res) => {
     }
   } catch {}
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const updateBookingStatus = asyncHandler(async (req, res) => {
@@ -1184,6 +1294,11 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
 
   await Booking.updateOne({ _id: id }, { $set: patch });
   const updated = await Booking.findById(id).lean();
+
+  try {
+    const noteText = next === 'in_progress' ? 'Bắt đầu thi công' : 'Hoàn tất';
+    await logBookingEvent({ bookingId: id, fromStatus: curr, toStatus: next, actorRole: 'WORKSHOP', actorId: vendorId, note: noteText, at: now });
+  } catch {}
 
   if (next === 'completed') {
     try {
@@ -1240,7 +1355,8 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
     }
   }
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const rescheduleBooking = asyncHandler(async (req, res) => {
@@ -1264,6 +1380,13 @@ const rescheduleBooking = asyncHandler(async (req, res) => {
   const prevTime = booking?.timeSlot ? new Date(booking.timeSlot) : null;
   await Booking.updateOne({ _id: id }, { $set: { timeSlot: nextDate } });
   const updated = await Booking.findById(id).lean();
+
+  try {
+    const prevLabel = prevTime ? prevTime.toISOString() : '';
+    const nextLabel = nextDate ? nextDate.toISOString() : '';
+    const noteText = prevLabel ? `Dời lịch: ${prevLabel} → ${nextLabel}` : `Dời lịch: ${nextLabel}`;
+    await logBookingEvent({ bookingId: id, fromStatus: 'accepted', toStatus: 'accepted', actorRole: 'WORKSHOP', actorId: vendorId, note: noteText, at: now });
+  } catch {}
 
   try {
     const [vendor, user] = await Promise.all([
@@ -1318,7 +1441,8 @@ const rescheduleBooking = asyncHandler(async (req, res) => {
     console.error('[Bookings] Lỗi gửi email dời lịch:', e?.message || e);
   }
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const captureBookingReview = asyncHandler(async (req, res) => {
@@ -1501,6 +1625,11 @@ const rejectBooking = asyncHandler(async (req, res) => {
   );
   const updated = await Booking.findById(id).lean();
 
+  try {
+    const noteText = reason ? `Shop từ chối: ${reason}` : 'Shop từ chối';
+    await logBookingEvent({ bookingId: id, fromStatus: 'pending', toStatus: 'rejected', actorRole: 'WORKSHOP', actorId: vendorId, note: noteText, at: now });
+  } catch {}
+
   const [vendor, user] = await Promise.all([
     Vendor.findById(vendorId).select('shopName address email phone').lean(),
     User.findById(booking.userId).select('name email').lean()
@@ -1581,7 +1710,8 @@ const rejectBooking = asyncHandler(async (req, res) => {
     }
   }
 
-  res.json({ item: updated });
+  const mapped = mapBookingToProjectStatus(updated);
+  res.json({ item: { ...updated, projectStatus: mapped.status, projectStatusReason: mapped.reason || '' } });
 });
 
 const expirePendingBookings = async () => {

@@ -3,7 +3,7 @@ import { useAuth } from '../services/auth/AuthContext.jsx';
 import { getMe, updateMe, uploadMyAvatar } from '../services/api/auth.js';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
-import { validateHumanName } from '../services/validation.js';
+import { humanizeImageUploadError, validateHumanName } from '../services/validation.js';
 
 const resolveUploadUrl = (url) => {
   const API_BASE_URL = getApiBaseUrl();
@@ -110,7 +110,7 @@ const Profile = () => {
           setCountry(serverCountry);
           setCountryAuto(false);
         } else {
-          setCountry(t('register_country_placeholder'));
+          setCountry('');
           setCountryAuto(true);
         }
         if (u) setAuth({ token, user: u });
@@ -129,11 +129,6 @@ const Profile = () => {
     };
   }, [setAuth, token]);
 
-  useEffect(() => {
-    if (!countryAuto) return;
-    setCountry(t('register_country_placeholder'));
-  }, [countryAuto, t]);
-
   const onSave = async () => {
     setSaving(true);
     setError('');
@@ -150,7 +145,7 @@ const Profile = () => {
         name: checkedName.value,
         dob: dobValue,
         gender: gender || '',
-        country
+        country: String(country || '').trim()
       };
       const data = await updateMe({ token, payload });
       const u = data?.user;
@@ -173,7 +168,7 @@ const Profile = () => {
       setAvatarFile(null);
       if (inputRef.current) inputRef.current.value = '';
     } catch (e) {
-      setError(e?.message || 'UPLOAD_FAILED');
+      setError(humanizeImageUploadError(e));
     } finally {
       setUploading(false);
     }
@@ -216,7 +211,7 @@ const Profile = () => {
 
         {error ? (
           <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-950/30 px-4 py-3 text-sm font-semibold text-red-100">
-            {error}
+            {t(error)}
           </div>
         ) : null}
 
@@ -274,6 +269,9 @@ const Profile = () => {
                         {t('admin_cancel_btn')}
                       </button>
                     ) : null}
+                  </div>
+                  <div className="mt-2 text-center text-[11px] font-semibold text-white/50 sm:text-left">
+                    Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.
                   </div>
 
                   <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-2">

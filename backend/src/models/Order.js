@@ -1,6 +1,17 @@
 const mongoose = require('mongoose');
 
-const ORDER_STATUSES = ['REQUESTED', 'QUOTED', 'REJECTED', 'CANCELLED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
+const ORDER_STATUSES = [
+  'REQUESTED',
+  'SHOP_REJECTED',
+  'QUOTED',
+  'REJECTED',
+  'CANCELLED',
+  'CONFIRMED',
+  'IN_PROGRESS',
+  'QUALITY_CHECK',
+  'COMPLETED',
+  'DISPUTED'
+];
 
 const orderSchema = new mongoose.Schema(
   {

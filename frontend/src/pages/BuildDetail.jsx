@@ -96,12 +96,16 @@ const TARGET_SIZE_BY_TYPE = {
   exhaust: 0.35,
   clutch: 0.25,
   wheels: 0.45,
+  frontWheel: 0.45,
+  rearWheel: 0.45,
   brake: 0.25,
   suspension: 0.4,
   tire: 0.45,
   handlebar: 0.35,
   bodykit: 0.6,
   seat: 0.35,
+  tank: 0.55,
+  headlight: 0.25,
   lighting: 0.25,
   throttle_housing: 0.25,
   topbox: 0.5
@@ -153,6 +157,7 @@ const BuildDetail = () => {
   const [selectedShopId, setSelectedShopId] = useState('');
   const [bookingBusy, setBookingBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [kycOpen, setKycOpen] = useState(false);
   const [kycMode, setKycMode] = useState('full');
   const [kycLastName, setKycLastName] = useState('');
@@ -332,6 +337,10 @@ const BuildDetail = () => {
     return slots;
   }, [allSelectedParts]);
 
+  const anchorPreset = useMemo(() => {
+    return Array.isArray(item?.carId?.anchors) ? item.carId.anchors : [];
+  }, [item?.carId?.anchors]);
+
   const partLabels = useMemo(() => {
     const out = [];
     const seen = new Set();
@@ -352,6 +361,20 @@ const BuildDetail = () => {
   const views = Number(item?.viewsCount) || 0;
   const voted = Boolean(item?.likedByMe);
   const favorited = Boolean(item?.favoritedByMe);
+  const shareUrl = useMemo(() => {
+    const safeId = encodeURIComponent(String(id || '').trim());
+    if (!safeId) return '';
+    try {
+      return `${window.location.origin}/builds/${safeId}`;
+    } catch {
+      return `/builds/${safeId}`;
+    }
+  }, [id]);
+  const shareTitle = useMemo(() => String(title || '').trim() || 'Carbanana Build', [title]);
+  const shareText = useMemo(() => {
+    const owner = String(userName || '').trim();
+    return owner ? `Xem bản độ của ${owner}` : 'Xem bản độ này';
+  }, [userName]);
 
   const onVote = async () => {
     if (!id || busy) return;
@@ -387,6 +410,38 @@ const BuildDetail = () => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const openExternalShare = (url) => {
+    const u = String(url || '').trim();
+    if (!u) return;
+    try {
+      window.open(u, '_blank', 'noopener,noreferrer');
+    } catch {
+      window.location.href = u;
+    }
+  };
+
+  const onCopyShareLink = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setToast('Đã copy link');
+    } catch {
+      setToast('Copy thất bại');
+    }
+  };
+
+  const onNativeShare = async () => {
+    if (!shareUrl) return;
+    if (!navigator?.share) {
+      setShareOpen(true);
+      return;
+    }
+    try {
+      await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+      setToast('Đã mở chia sẻ');
+    } catch {}
   };
 
   const closeBooking = () => {
@@ -515,7 +570,7 @@ const BuildDetail = () => {
     }
     const picked = shops.find((x) => String(x?._id || '') === String(selectedShopId || ''));
     if (picked && picked?.acceptingBookings === false) {
-      setToast('Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.');
+      setToast('Shop hiện tại đang tạm ngưng.');
       return;
     }
     if (picked?.closedToday) {
@@ -699,7 +754,7 @@ const BuildDetail = () => {
         return;
       }
       if (msg === 'SHOP_NOT_ACCEPTING') {
-        setKycError('Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.');
+        setKycError('Shop hiện tại đang tạm ngưng.');
         return;
       }
       if (msg === 'SHOP_CLOSED_TODAY') {
@@ -866,6 +921,7 @@ const BuildDetail = () => {
                     carModelUrl={carModelUrl}
                     color={String(item?.selectedColor || '').trim() || '#ffffff'}
                     highlightType=""
+                    anchorPreset={anchorPreset}
                     slots={viewerSlots}
                     embeddedConfig={{}}
                     background={viewerBackgroundKey}
@@ -910,6 +966,58 @@ const BuildDetail = () => {
                   <span>❤️</span>
                   <span>{favorited ? t('leaderboard_favorited') : t('leaderboard_favorite')}</span>
                 </motion.button>
+
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  onClick={onNativeShare}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+                >
+                  <span>🔗</span>
+                  <span>Chia sẻ</span>
+                </motion.button>
+
+                {shareOpen ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs font-semibold text-white/60">Chia sẻ ra ứng dụng</div>
+                    <div className="mt-3 grid gap-2">
+                      <button
+                        type="button"
+                        onClick={onCopyShareLink}
+                        className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/10"
+                      >
+                        Copy link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const u = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(String(shareUrl || ''))}`;
+                          openExternalShare(u);
+                        }}
+                        className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/10"
+                      >
+                        Chia sẻ Facebook
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const u = `https://zalo.me/share?url=${encodeURIComponent(String(shareUrl || ''))}&title=${encodeURIComponent(String(shareTitle || ''))}`;
+                          openExternalShare(u);
+                        }}
+                        className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/10"
+                      >
+                        Chia sẻ Zalo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShareOpen(false)}
+                        className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/70 hover:bg-white/10"
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -1035,7 +1143,7 @@ const BuildDetail = () => {
                             ) : null}
                             {!isAccepting ? (
                               <div className="rounded-full border border-rose-400/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
-                                Tạm ngưng nhận
+                                Tạm ngưng
                               </div>
                             ) : null}
                             {s?.closedToday ? (
@@ -1045,7 +1153,7 @@ const BuildDetail = () => {
                             ) : null}
                           </div>
                           {!isAccepting ? (
-                            <div className="mt-2 text-xs text-white/55">Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.</div>
+                            <div className="mt-2 text-xs text-white/55">Shop hiện tại đang tạm ngưng.</div>
                           ) : null}
                         </button>
                       );
@@ -1068,7 +1176,7 @@ const BuildDetail = () => {
                     if (!picked || picked?.acceptingBookings !== false) return null;
                     return (
                       <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                        Shop tạm thời ngưng nhận vì khách đông, mong bạn thông cảm.
+                        Shop hiện tại đang tạm ngưng.
                       </div>
                     );
                   })()}

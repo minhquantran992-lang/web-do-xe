@@ -1080,7 +1080,16 @@ const DICT = {
     shop_booking_rule_desc: 'If ASAP is selected, the system will auto-assign nearest available workshops.',
     shop_booking_submitted: 'Request submitted. We will confirm availability shortly.',
     AI_BLOCKED_PROFANITY: 'Please keep the conversation polite. Profanity is not supported.',
-    AI_BLOCKED_SENSITIVE: 'This topic is sensitive and not supported. Please switch to another topic.'
+    AI_BLOCKED_SENSITIVE: 'This topic is sensitive and not supported. Please switch to another topic.',
+    FAILED_TO_LOAD: 'Failed to load. Please try again.',
+    REQUEST_FAILED: 'Request failed. Please try again.',
+    UPDATE_FAILED: 'Update failed. Please try again.',
+    QUOTE_REQUIRED: 'Please enter a quote price.',
+    INVALID_QUOTED_PRICE: 'Invalid quote price.',
+    REASON_REQUIRED: 'Please enter a reason.',
+    PART_NOT_COMPATIBLE: 'This part is not compatible with the selected vehicle.',
+    NETWORK_ERROR: 'Network error. Please check your connection.',
+    SERVER_ERROR: 'Server error. Please try again later.'
   },
   vi: {
     app_name: 'ELO RIDE',
@@ -1352,7 +1361,7 @@ const DICT = {
     landing_guided_badge: 'GUIDED BUILDER',
     landing_guided_title: 'Build theo từng bước',
     landing_guided_desc: 'Chọn xe, chọn style, rồi vào garage để độ realtime.',
-    landing_guided_browse_all: 'Mở toàn bộ xe',
+    landing_guided_browse_all: 'Xem toàn bộ hãng xe',
     landing_step_vehicle: 'Chọn xe',
     landing_step_style: 'Chọn style',
     landing_step_garage: 'Vào garage',
@@ -1673,7 +1682,7 @@ const DICT = {
     build_detail_parts: 'món',
 
     carcard_default: 'Xe',
-    carcard_customize: 'Độ xe',
+    carcard_customize: 'Bắt đầu custom',
 
     auth_login_title: 'Đăng nhập',
     auth_password_label: 'Mật khẩu',
@@ -2158,7 +2167,16 @@ const DICT = {
     shop_booking_rule_desc: 'Nếu chọn ASAP, hệ thống tự động ưu tiên xưởng gần nhất đang rảnh.',
     shop_booking_submitted: 'Đã gửi yêu cầu. Hệ thống sẽ xác nhận sớm.',
     AI_BLOCKED_PROFANITY: 'Vui lòng dùng ngôn ngữ lịch sự. Hệ thống không hỗ trợ nội dung nói bậy.',
-    AI_BLOCKED_SENSITIVE: 'Chủ đề nhạy cảm không được hỗ trợ. Vui lòng chuyển sang nội dung khác.'
+    AI_BLOCKED_SENSITIVE: 'Chủ đề nhạy cảm không được hỗ trợ. Vui lòng chuyển sang nội dung khác.',
+    FAILED_TO_LOAD: 'Tải dữ liệu thất bại. Vui lòng thử lại.',
+    REQUEST_FAILED: 'Yêu cầu thất bại. Vui lòng thử lại.',
+    UPDATE_FAILED: 'Cập nhật thất bại. Vui lòng thử lại.',
+    QUOTE_REQUIRED: 'Vui lòng nhập báo giá.',
+    INVALID_QUOTED_PRICE: 'Báo giá không hợp lệ.',
+    REASON_REQUIRED: 'Vui lòng nhập lý do.',
+    PART_NOT_COMPATIBLE: 'Phụ kiện không tương thích với xe đã chọn.',
+    NETWORK_ERROR: 'Lỗi mạng. Vui lòng kiểm tra kết nối.',
+    SERVER_ERROR: 'Lỗi máy chủ. Vui lòng thử lại sau.'
   }
 };
 
@@ -2172,15 +2190,22 @@ export const translate = (key, forcedLang) => {
 };
 
 export const LanguageProvider = ({ children }) => {
-  const [lang, setLang] = useState('vi');
-
-  useEffect(() => {
-    const saved = String(localStorage.getItem(STORAGE_KEY) || '').trim().toLowerCase();
-    if (saved === 'en' || saved === 'vi') setLang(saved);
-  }, []);
+  const [lang, setLang] = useState(() => {
+    try {
+      const saved = String(localStorage.getItem(STORAGE_KEY) || '').trim().toLowerCase();
+      if (saved === 'en' || saved === 'vi') return saved;
+    } catch {}
+    return 'vi';
+  });
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, lang);
+  }, [lang]);
+
+  useEffect(() => {
+    try {
+      if (typeof document !== 'undefined') document.documentElement.lang = lang;
+    } catch {}
   }, [lang]);
 
   const api = useMemo(() => {

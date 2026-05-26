@@ -5,10 +5,10 @@ import OptionsPanel from '../components/configurator/OptionsPanel.jsx';
 import Sidebar from '../components/configurator/Sidebar.jsx';
 import Viewer from '../components/configurator/Viewer.jsx';
 import { getBackgrounds, getCars } from '../services/api/cars.js';
-import { getParts } from '../services/api/parts.js';
+import { getPartsForCar } from '../services/api/parts.js';
 import { createConfiguration, setConfigurationThumbnail, shareBuild, updateConfigurationPaint, updateConfigurationPart } from '../services/api/configurations.js';
 import { getApiBaseUrl } from '../services/api/client.js';
-import { normalizeVariantKey, resolveBestComboKey } from '../services/combinedModels.js';
+import { makeComboKey, normalizeVariantKey, resolveBestComboKey } from '../services/combinedModels.js';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 import { useI18n } from '../services/i18n.jsx';
 
@@ -82,6 +82,7 @@ const Configurator = () => {
   const [comboPreviewOpen, setComboPreviewOpen] = useState(false);
   const [comboPreviewKey, setComboPreviewKey] = useState('');
   const [forcedCombinedModelKey, setForcedCombinedModelKey] = useState('');
+  const [lastPickedType, setLastPickedType] = useState('');
   const [savingBuild, setSavingBuild] = useState(false);
   const [sharePromptOpen, setSharePromptOpen] = useState(false);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
@@ -115,11 +116,19 @@ const Configurator = () => {
     let alive = true;
     setLoading(true);
     setError('');
-    Promise.all([getCars(), getParts(), getBackgrounds().catch(() => [])])
+    Promise.all([getCars(), getPartsForCar({ carId: bikeId, strict: true }), getBackgrounds().catch(() => [])])
       .then(([carsRes, partsRes, bgRes]) => {
         if (!alive) return;
         setCars(Array.isArray(carsRes) ? carsRes : []);
-        setParts(Array.isArray(partsRes) ? partsRes : []);
+        const list = Array.isArray(partsRes) ? partsRes : [];
+        const cid = String(bikeId || '').trim();
+        const filtered = cid
+          ? list.filter((p) => {
+              const arr = Array.isArray(p?.compatibleCars) ? p.compatibleCars : [];
+              return arr.some((x) => String(x || '') === cid);
+            })
+          : list;
+        setParts(filtered);
         setBackgrounds(Array.isArray(bgRes) ? bgRes : []);
       })
       .catch((e) => {
@@ -133,7 +142,7 @@ const Configurator = () => {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [bikeId]);
 
   useEffect(() => {
     setSelectedByType({});
@@ -188,6 +197,7 @@ const Configurator = () => {
   }, [comboPreviewOpen]);
 
   const bike = useMemo(() => cars.find((c) => String(c?._id || '') === String(bikeId || '')), [cars, bikeId]);
+  const anchorPreset = useMemo(() => (Array.isArray(bike?.anchors) ? bike.anchors : []), [bike?.anchors]);
   const displayBikeName = useMemo(() => {
     const n = String(bike?.name || bike?.title || '').trim();
     const key = n.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -205,7 +215,8 @@ const Configurator = () => {
     if (u.startsWith('R0lGOD')) return `data:image/gif;base64,${u}`;
     if (u.startsWith('UklGR')) return `data:image/webp;base64,${u}`;
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
-    if (u.startsWith('/')) return `${API_BASE_URL}${u}`;
+    if (u.startsWith('/uploads/')) return `${API_BASE_URL}${u}`;
+    if (u.startsWith('/')) return u;
     return `${API_BASE_URL}/${u}`;
   };
 
@@ -292,8 +303,8 @@ const Configurator = () => {
   const groups = useMemo(
     () => [
       { key: 'performance', label: t('cfg_group_performance'), types: ['exhaust', 'clutch'] },
-      { key: 'handling', label: t('cfg_group_handling'), types: ['wheels', 'brake', 'suspension', 'tire', 'handlebar'] },
-      { key: 'appearance', label: t('cfg_group_appearance'), types: ['bodykit', 'seat', 'lighting', 'topbox'] },
+      { key: 'handling', label: t('cfg_group_handling'), types: ['frontWheel', 'rearWheel', 'wheels', 'brake', 'suspension', 'tire', 'handlebar'] },
+      { key: 'appearance', label: t('cfg_group_appearance'), types: ['bodykit', 'seat', 'tank', 'headlight', 'lighting', 'topbox'] },
       { key: 'electronics', label: t('cfg_group_electronics'), types: ['throttle_housing'] }
     ],
     [t]
@@ -310,12 +321,16 @@ const Configurator = () => {
     if (key === 'exhaust') return t('part_exhaust');
     if (key === 'clutch') return t('part_clutch');
     if (key === 'wheels') return t('part_wheels');
+    if (key === 'frontWheel') return 'Bánh trước';
+    if (key === 'rearWheel') return 'Bánh sau';
     if (key === 'brake') return t('part_brake');
     if (key === 'suspension') return t('part_suspension');
     if (key === 'tire') return t('part_tire');
     if (key === 'handlebar') return t('part_handlebar');
     if (key === 'bodykit') return t('part_bodykit');
     if (key === 'seat') return t('part_seat');
+    if (key === 'tank') return 'Bình xăng';
+    if (key === 'headlight') return 'Đèn trước';
     if (key === 'lighting') return t('part_lighting');
     if (key === 'throttle_housing') return t('part_throttle_housing');
     if (key === 'topbox') return t('part_topbox');
@@ -572,14 +587,12 @@ const Configurator = () => {
     const url = key ? String(modelMap[key] || '').trim() : '';
     if (!url) return { url: '', key: '', covered: [] };
 
-    const tokens = String(key || '').split('_');
-    const coveredByKey = order.filter((slot, idx) => String(tokens[idx] || 'stock') !== 'stock');
-    if (tokens.length < order.length) {
-      const nonStock = order.filter((slot) => (normalizeVariantKey(comboPreviewConfig?.[slot] || 'stock') || 'stock') !== 'stock');
-      if (nonStock.length === 1) return { url, key, covered: nonStock };
+    const nonStock = order.filter((slot) => (normalizeVariantKey(comboPreviewConfig?.[slot] || 'stock') || 'stock') !== 'stock');
+    if (nonStock.length >= 2) {
+      const exactKey = makeComboKey({ slotsOrder: order, config: comboPreviewConfig });
+      if (exactKey && String(exactKey) !== String(key)) return { url: '', key: '', covered: [] };
     }
-    const covered = coveredByKey;
-    return { url, key, covered };
+    return { url, key, covered: nonStock };
   }, [bike, comboPreviewConfig, comboPreviewForcedModelKey, comboPreviewSelectedByType, comboPreviewSlotsOrder]);
 
   const comboPreviewCombinedModelUrl = comboPreviewCombinedModelSelection.url;
@@ -591,13 +604,17 @@ const Configurator = () => {
       exhaust: 0.35,
       clutch: 0.25,
       wheels: 0.45,
+      frontWheel: 0.45,
+      rearWheel: 0.45,
       brake: 0.25,
       suspension: 0.4,
       tire: 0.45,
       handlebar: 0.35,
       bodykit: 0.6,
       seat: 0.35,
+      tank: 0.55,
       lighting: 0.25,
+      headlight: 0.25,
       throttle_housing: 0.25,
       topbox: 0.5
     }),
@@ -900,19 +917,39 @@ const Configurator = () => {
     }
     if (!order.length) return { url: '', key: '', covered: [] };
 
-    const key = resolveBestComboKey({ slotsOrder: order, modelMap, config: comboConfig });
-    const url = key ? String(modelMap[key] || '').trim() : '';
-    if (!url) return { url: '', key: '', covered: [] };
+    const tokenByType = (type) => normalizeVariantKey(comboConfig?.[type] || 'stock') || 'stock';
+    const selectedTypes = selectedByType && typeof selectedByType === 'object' ? Object.keys(selectedByType) : [];
+    const resolveSingleTypeUrl = (type) => {
+      const slot = String(type || '').trim();
+      if (!slot) return { key: '', url: '' };
+      const token = tokenByType(slot);
+      if (!token || token === 'stock') return { key: '', url: '' };
+      const best = resolveBestComboKey({ slotsOrder: [slot], modelMap, config: { [slot]: token } });
+      const url = best ? String(modelMap[best] || '').trim() : '';
+      return url ? { key: best, url } : { key: '', url: '' };
+    };
 
-    const tokens = String(key || '').split('_');
-    const coveredByKey = order.filter((slot, idx) => String(tokens[idx] || 'stock') !== 'stock');
-    if (tokens.length < order.length) {
-      const nonStock = order.filter((slot) => (normalizeVariantKey(comboConfig?.[slot] || 'stock') || 'stock') !== 'stock');
-      if (nonStock.length === 1) return { url, key, covered: nonStock };
+    const exactKey = makeComboKey({ slotsOrder: order, config: comboConfig });
+    const exactUrl = exactKey ? String(modelMap[exactKey] || '').trim() : '';
+    const nonStockOrder = order.filter((slot) => tokenByType(slot) !== 'stock');
+    if (exactUrl && nonStockOrder.length) return { url: exactUrl, key: exactKey, covered: nonStockOrder };
+
+    const picked = String(lastPickedType || '').trim();
+    if (picked) {
+      const r = resolveSingleTypeUrl(picked);
+      if (r.url) return { url: r.url, key: r.key, covered: [picked] };
     }
-    const covered = coveredByKey;
-    return { url, key, covered };
-  }, [bike, comboConfig, comboSlotsOrder, forcedCombinedModelKey, selectedByType]);
+
+    const priorities = ['exhaust', 'wheels', 'tire', 'bodykit', 'topbox', 'handlebar', 'seat', 'lighting', 'brake', 'suspension', 'throttle_housing', 'clutch'];
+    const candidates = [...priorities.filter((x) => selectedTypes.includes(x)), ...selectedTypes.filter((x) => !priorities.includes(x))];
+    for (const type of candidates) {
+      const r = resolveSingleTypeUrl(type);
+      if (!r.url) continue;
+      return { url: r.url, key: r.key, covered: [String(type || '').trim()] };
+    }
+
+    return { url: '', key: '', covered: [] };
+  }, [bike, comboConfig, comboSlotsOrder, forcedCombinedModelKey, lastPickedType, selectedByType]);
 
   const combinedModelUrl = combinedModelSelection.url;
   const combinedModelCovered = combinedModelSelection.covered;
@@ -964,25 +1001,76 @@ const Configurator = () => {
 
   const baseSpecs = useMemo(() => {
     const s = bike?.specs && typeof bike.specs === 'object' ? bike.specs : {};
-    const toNumOrNull = (v) => {
+    const parseNumberFlexible = (v) => {
       if (v === null || v === undefined || v === '') return null;
-      const n = Number(v);
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      const raw = String(v || '').trim();
+      if (!raw) return null;
+      const match = raw.replace(/\s+/g, '').match(/-?[\d.,]+/);
+      if (!match) return null;
+      let token = String(match[0] || '');
+      if (token.includes('.') && token.includes(',')) {
+        const lastDot = token.lastIndexOf('.');
+        const lastComma = token.lastIndexOf(',');
+        if (lastComma > lastDot) token = token.replace(/\./g, '').replace(',', '.');
+        else token = token.replace(/,/g, '');
+      } else if (token.includes(',')) {
+        const parts = token.split(',');
+        if (parts.length === 2 && parts[1].length === 3) token = parts.join('');
+        else if (parts.length === 2) token = `${parts[0]}.${parts[1]}`;
+        else token = parts.join('');
+      } else if (token.includes('.')) {
+        const parts = token.split('.');
+        if (parts.length > 2) {
+          const last = parts[parts.length - 1];
+          if (last.length === 3) token = parts.join('');
+          else token = `${parts.slice(0, -1).join('')}.${last}`;
+        }
+      }
+      const n = Number(token);
       return Number.isFinite(n) ? n : null;
     };
     return {
-      powerHp: toNumOrNull(s.powerHp),
-      torqueNm: toNumOrNull(s.torqueNm),
-      weightKg: toNumOrNull(s.weightKg),
-      topSpeedKph: toNumOrNull(s.topSpeedKph),
-      fuelL: toNumOrNull(s.fuelL)
+      powerHp: parseNumberFlexible(s.powerHp),
+      torqueNm: parseNumberFlexible(s.torqueNm),
+      weightKg: parseNumberFlexible(s.weightKg),
+      topSpeedKph: parseNumberFlexible(s.topSpeedKph),
+      fuelL: parseNumberFlexible(s.fuelL)
     };
   }, [bike]);
 
   const bonusSpecs = useMemo(() => {
-    const toNumOr0 = (v) => {
-      if (v === null || v === undefined || v === '') return 0;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : 0;
+    const toNumOr0Flexible = (v) => {
+      const n = (() => {
+        if (v === null || v === undefined || v === '') return null;
+        if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+        const raw = String(v || '').trim();
+        if (!raw) return null;
+        const match = raw.replace(/\s+/g, '').match(/-?[\d.,]+/);
+        if (!match) return null;
+        let token = String(match[0] || '');
+        if (token.includes('.') && token.includes(',')) {
+          const lastDot = token.lastIndexOf('.');
+          const lastComma = token.lastIndexOf(',');
+          if (lastComma > lastDot) token = token.replace(/\./g, '').replace(',', '.');
+          else token = token.replace(/,/g, '');
+        } else if (token.includes(',')) {
+          const parts = token.split(',');
+          if (parts.length === 2 && parts[1].length === 3) token = parts.join('');
+          else if (parts.length === 2) token = `${parts[0]}.${parts[1]}`;
+          else token = parts.join('');
+        } else if (token.includes('.')) {
+          const parts = token.split('.');
+          if (parts.length > 2) {
+            const last = parts[parts.length - 1];
+            if (last.length === 3) token = parts.join('');
+            else token = `${parts.slice(0, -1).join('')}.${last}`;
+          }
+        }
+        const out = Number(token);
+        return Number.isFinite(out) ? out : null;
+      })();
+      return n === null ? 0 : n;
     };
     const totals = { powerHp: 0, torqueNm: 0, weightKg: 0, topSpeedKph: 0, fuelL: 0 };
     const seen = new Set();
@@ -994,11 +1082,11 @@ const Configurator = () => {
       const p = partsById.get(id);
       if (!p) continue;
       const s = p?.specs && typeof p.specs === 'object' ? p.specs : {};
-      totals.powerHp += toNumOr0(s.powerHp);
-      totals.torqueNm += toNumOr0(s.torqueNm);
-      totals.weightKg += toNumOr0(s.weightKg);
-      totals.topSpeedKph += toNumOr0(s.topSpeedKph);
-      totals.fuelL += toNumOr0(s.fuelL);
+      totals.powerHp += toNumOr0Flexible(s.powerHp);
+      totals.torqueNm += toNumOr0Flexible(s.torqueNm);
+      totals.weightKg += toNumOr0Flexible(s.weightKg);
+      totals.topSpeedKph += toNumOr0Flexible(s.topSpeedKph);
+      totals.fuelL += toNumOr0Flexible(s.fuelL);
     }
     return totals;
   }, [partsById, selectedByType]);
@@ -1072,6 +1160,7 @@ const Configurator = () => {
     const partId = String(id || '');
     const current = String(selectedByType?.[key] || '');
     const nextId = current && current === partId ? '' : partId;
+    if (nextId) setLastPickedType(key);
     setSelectedByType((prev) => {
       const next = { ...(prev || {}) };
       if (!nextId) delete next[key];
@@ -1088,6 +1177,10 @@ const Configurator = () => {
         ? { name: embeddedNameFromSelection(nextId) }
         : partsById.get(nextId)
       : null;
+    if (nextId && !isEmbeddedSelection(nextId)) {
+      const url = String(p?.modelUrl || '').trim();
+      if (!url) showToast('Phụ kiện này chưa có model 3D rời (modelUrl trống). Nếu bạn chỉ có model xe gắn sẵn, hãy upload vào Model gộp hoặc thêm model rời cho phụ kiện.');
+    }
     if (p?.name) showToast(`${t('cfg_toast_applied_prefix')} ${partLabel(key)} ${p.name}`);
     else if (!nextId) showToast(`${t('cfg_toast_cleared_prefix')} ${partLabel(key)}`);
   };
@@ -1479,7 +1572,7 @@ const Configurator = () => {
               ref={viewerRef}
               carModelUrl={effectiveCarModelUrl}
               color={safeCarColor}
-              anchorPreset={bike?.anchors}
+              anchorPreset={anchorPreset}
               highlightType={hasPickedType ? activeType : ''}
               onHoverPart={(info) => setHover3d(info)}
               onCarMeta={(meta) => {
@@ -1642,7 +1735,7 @@ const Configurator = () => {
                     <Viewer
                       carModelUrl={comboPreviewEffectiveCarModelUrl}
                       color={safeCarColor}
-                      anchorPreset={bike?.anchors}
+                      anchorPreset={anchorPreset}
                       highlightType=""
                       onHoverPart={() => {}}
                       onCarMeta={() => {}}
@@ -1741,7 +1834,7 @@ const Configurator = () => {
                       <Viewer
                         carModelUrl={effectiveCarModelUrl}
                         color={isHexColor(selectedComboStyle?.color) ? String(selectedComboStyle?.color).trim() : safeCarColor}
-                        anchorPreset={bike?.anchors}
+                        anchorPreset={anchorPreset}
                         highlightType=""
                         onHoverPart={() => {}}
                         onCarMeta={() => {}}

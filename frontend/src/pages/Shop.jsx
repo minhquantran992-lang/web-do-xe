@@ -80,6 +80,8 @@ const Shop = ({ mode } = {}) => {
   const [applyError, setApplyError] = useState('');
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyDone, setApplyDone] = useState(false);
+  const [applyEmailHint, setApplyEmailHint] = useState({ kind: '', text: '' });
+  const applyEmailTimerRef = useRef(null);
   const [addressAuto, setAddressAuto] = useState(false);
   const [shopGpsBusy, setShopGpsBusy] = useState(false);
   const [shopGpsError, setShopGpsError] = useState('');
@@ -164,11 +166,62 @@ const Shop = ({ mode } = {}) => {
 
   useEffect(() => {
     if (!isApplyMode) return;
+    if (applyEmailTimerRef.current) window.clearTimeout(applyEmailTimerRef.current);
+    const raw = String(form.email || '').trim();
+    if (!raw) {
+      setApplyEmailHint({ kind: '', text: '' });
+      return;
+    }
+    const checked = validateEmail(raw);
+    if (!checked.ok) {
+      setApplyEmailHint({ kind: 'error', text: checked.error });
+      return;
+    }
+    if (isAuthed) {
+      const me = String(user?.email || '').trim().toLowerCase();
+      const entered = String(checked.value || '').trim().toLowerCase();
+      if (me && entered && me !== entered) {
+        setApplyEmailHint({ kind: 'warn', text: 'Email này khác email đăng nhập. Nên dùng email đăng nhập để xét duyệt nhanh.' });
+      } else {
+        setApplyEmailHint({ kind: '', text: '' });
+      }
+    } else {
+      setApplyEmailHint({ kind: 'checking', text: 'Đang kiểm tra email…' });
+    }
+
+    applyEmailTimerRef.current = window.setTimeout(async () => {
+      try {
+        const resp = await apiFetch(`/api/vendors/check-email?email=${encodeURIComponent(String(checked.value || ''))}`);
+        const hasMx = resp?.hasMx !== false;
+        const existsInSystem = Boolean(resp?.existsInSystem);
+        if (!hasMx) {
+          setApplyEmailHint({ kind: 'warn', text: 'Email domain không hợp lệ hoặc không nhận mail. Vui lòng kiểm tra lại.' });
+          return;
+        }
+        if (!existsInSystem) {
+          setApplyEmailHint({ kind: 'warn', text: 'Email này chưa có tài khoản trên hệ thống. Bạn nên đăng ký tài khoản bằng email này để được duyệt.' });
+          return;
+        }
+        setApplyEmailHint({ kind: 'ok', text: 'Email hợp lệ.' });
+      } catch (e) {
+        setApplyEmailHint({ kind: 'warn', text: 'Không kiểm tra được email lúc này. Bạn vẫn có thể gửi đăng ký.' });
+      }
+    }, 450);
+
+    return () => {
+      if (applyEmailTimerRef.current) window.clearTimeout(applyEmailTimerRef.current);
+    };
+  }, [form.email, isApplyMode, isAuthed, user?.email]);
+
+  useEffect(() => {
+    if (!isApplyMode) return;
     if (!isVendor) return;
     navigate('/seller-center', { replace: true });
   }, [isApplyMode, isVendor, navigate]);
 
   const status = useMemo(() => toStatus(shop?.status), [shop?.status]);
+  const representativeNameCheck = useMemo(() => validateHumanName(String(form.representativeName || '')), [form.representativeName]);
+  const showRepresentativeNameWarning = Boolean(String(form.representativeName || '').trim() && !representativeNameCheck.ok);
 
   const statusBadge = useMemo(() => {
     if (status === 'approved') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
@@ -696,6 +749,9 @@ const Shop = ({ mode } = {}) => {
                                     placeholder="VD: Nguyễn Văn A"
                                     required
                                   />
+                                  {showRepresentativeNameWarning ? (
+                                    <div className="mt-2 text-sm text-red-300">{representativeNameCheck.error}</div>
+                                  ) : null}
                                 </label>
 
                                 <label className="block sm:col-span-2">
@@ -731,6 +787,21 @@ const Shop = ({ mode } = {}) => {
                                     placeholder="VD: shop@gmail.com"
                                     required
                                   />
+                                  {applyEmailHint?.text ? (
+                                    <div
+                                      className={`mt-2 text-sm ${
+                                        applyEmailHint.kind === 'error'
+                                          ? 'text-red-300'
+                                          : applyEmailHint.kind === 'warn'
+                                            ? 'text-amber-200'
+                                            : applyEmailHint.kind === 'ok'
+                                              ? 'text-emerald-200'
+                                              : 'text-zinc-400'
+                                      }`}
+                                    >
+                                      {applyEmailHint.text}
+                                    </div>
+                                  ) : null}
                                 </label>
                               </div>
 
@@ -816,6 +887,9 @@ const Shop = ({ mode } = {}) => {
                       placeholder="VD: Nguyễn Văn A"
                       required
                     />
+                    {showRepresentativeNameWarning ? (
+                      <div className="mt-2 text-sm text-red-300">{representativeNameCheck.error}</div>
+                    ) : null}
                   </label>
 
                   <label className="block">
@@ -850,6 +924,21 @@ const Shop = ({ mode } = {}) => {
                       placeholder="VD: shop@gmail.com"
                       required
                     />
+                    {applyEmailHint?.text ? (
+                      <div
+                        className={`mt-2 text-sm ${
+                          applyEmailHint.kind === 'error'
+                            ? 'text-red-300'
+                            : applyEmailHint.kind === 'warn'
+                              ? 'text-amber-200'
+                              : applyEmailHint.kind === 'ok'
+                                ? 'text-emerald-200'
+                                : 'text-zinc-400'
+                        }`}
+                      >
+                        {applyEmailHint.text}
+                      </div>
+                    ) : null}
                   </label>
 
                   <div className="flex items-center justify-end">

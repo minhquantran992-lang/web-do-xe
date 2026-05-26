@@ -28,7 +28,7 @@ const { authRequired } = require('../middleware/auth');
 const { rateLimit, compose } = require('../middleware/rateLimit');
 const { requireTurnstile } = require('../middleware/turnstile');
 const { requireCsrf } = require('../middleware/csrfProtection');
-const { validateAvatarFile } = require('../security/uploadValidation');
+const { validateAvatarFile, moderateImageFile } = require('../security/uploadValidation');
 
 const router = express.Router();
 
@@ -112,6 +112,13 @@ const validateAvatarUploaded = async (req, res, next) => {
       } catch {}
       const status = checked.error === 'FILE_TOO_LARGE' ? 413 : 400;
       return res.status(status).json({ error: checked.error });
+    }
+    const mod = await moderateImageFile({ filePath: file.path, originalName: file.originalname, maxBytes: 5 * 1024 * 1024 });
+    if (!mod.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
     }
     return next();
   } catch (e) {

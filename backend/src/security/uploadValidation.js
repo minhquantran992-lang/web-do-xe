@@ -163,4 +163,48 @@ const validateModelFile = async ({ filePath, originalName, maxBytes = 200 * 1024
   }
 };
 
-module.exports = { validateAvatarFile, validateModelFile };
+const moderateImageFile = async ({ filePath, originalName, maxBytes }) => {
+  const enabledRaw = String(process.env.IMAGE_MODERATION_ENABLED ?? '').trim().toLowerCase();
+  if (enabledRaw === '0' || enabledRaw === 'false' || enabledRaw === 'off') return { ok: true, skipped: true };
+
+  const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey) return { ok: false, error: 'MODERATION_NOT_CONFIGURED' };
+
+  const stat = await fs.promises.stat(filePath);
+  const cap = Math.max(64 * 1024, Math.floor(Number(maxBytes || process.env.IMAGE_MODERATION_MAX_BYTES || 10 * 1024 * 1024)));
+  if (stat.size > cap) return { ok: false, error: 'FILE_TOO_LARGE' };
+
+  const head = await readHead(filePath, 64);
+  const kind = detectImageKind(head);
+  if (!kind) return { ok: false, error: 'INVALID_FILE_TYPE' };
+
+  const mime = kind === 'jpg' ? 'image/jpeg' : `image/${kind}`;
+  const b64 = await fs.promises.readFile(filePath, 'base64');
+  const dataUrl = `data:${mime};base64,${b64}`;
+
+  const model = String(process.env.AI_MODEL_MODERATION || 'omni-moderation-latest').trim();
+  const resp = await fetch('https://api.openai.com/v1/moderations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          type: 'input_image',
+          image_url: dataUrl
+        }
+      ]
+    })
+  }).catch(() => null);
+
+  if (!resp || !resp.ok) return { ok: false, error: 'MODERATION_FAILED' };
+
+  const data = await resp.json().catch(() => null);
+  const flagged = Boolean(data?.results?.[0]?.flagged);
+  if (flagged) return { ok: false, error: 'SENSITIVE_IMAGE' };
+
+  const name = String(originalName || '').trim();
+  return { ok: true, model, name };
+};
+
+module.exports = { validateAvatarFile, validateModelFile, moderateImageFile };

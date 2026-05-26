@@ -1,8 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { checkModLegality } from '../../services/api/ai.js';
 import { useI18n } from '../../services/i18n.jsx';
-import { useAuth } from '../../services/auth/AuthContext.jsx';
+import { checkModLegality } from '../../services/api/ai.js';
 
 const OptionsPanel = ({
   title,
@@ -21,7 +20,6 @@ const OptionsPanel = ({
   onResetCarColor,
   baseSpecs,
   bonusSpecs,
-  emissions,
   readOnly,
   onClear,
   clearLabel,
@@ -30,25 +28,10 @@ const OptionsPanel = ({
   emptyLabel
 }) => {
   const { t, lang } = useI18n();
-  const { user } = useAuth();
   const conflictSet = conflictPartIds?.has ? conflictPartIds : new Set();
   const selected = String(selectedId || '').trim();
   const selectedHasConflict = Boolean(selected && conflictSet.has(selected));
   const altList = useMemo(() => (Array.isArray(alternatives) ? alternatives : []), [alternatives]);
-  const lawUiVi = useMemo(
-    () => ({
-      title: 'Kiểm tra hợp pháp (VN)',
-      basisHint: 'Theo Nghị định 100/2019 & 123/2021',
-      checkBtn: 'Kiểm tra',
-      result: 'Kết quả',
-      fineLabel: 'Mức phạt',
-      alternativesLabel: 'Gợi ý an toàn hơn',
-      more: 'Xem thêm',
-      less: 'Thu gọn',
-      status: { legal: 'Hợp pháp', warning: 'Có nguy cơ bị phạt', illegal: 'Vi phạm luật' }
-    }),
-    []
-  );
   const safeT = (key, fallback) => {
     const v = String(t(key) || '').trim();
     return v && v !== key ? v : fallback;
@@ -56,11 +39,11 @@ const OptionsPanel = ({
   const list = useMemo(() => (Array.isArray(items) ? items : []), [items]);
   const selectedPart = useMemo(() => list.find((x) => String(x?._id || '') === selected) || null, [list, selected]);
   const selectedPartName = String(selectedPart?.name || '').trim();
+  const [compareOpen, setCompareOpen] = useState(false);
   const [lawOpen, setLawOpen] = useState(false);
   const [lawLoading, setLawLoading] = useState(false);
   const [lawError, setLawError] = useState('');
   const [lawResult, setLawResult] = useState(null);
-  const [compareOpen, setCompareOpen] = useState(false);
   const safeCarColor = String(carColor || '#ffffff').trim() || '#ffffff';
   const normalizeHex6 = (value) => {
     const v = String(value || '').trim().toLowerCase();
@@ -116,24 +99,6 @@ const OptionsPanel = ({
   };
   const carColorMeta = useMemo(() => colorNameFromHex(safeCarColor), [safeCarColor, lang]);
 
-  const canCheck = Boolean(selected && selectedPartName && String(activeType || '').trim());
-  const isVietnameseUser = useMemo(() => {
-    const raw = String(user?.country || '').trim();
-    if (!raw) return false;
-    const k = raw
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{Diacritic}/gu, '')
-      .replace(/đ/g, 'd')
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (k === 'vn' || k === 'vietnam' || k === 'viet nam') return true;
-    if (k.includes('viet')) return true;
-    return false;
-  }, [user?.country]);
-  const canShowLawCheck = Boolean(selected) && (String(lang || '').trim().toLowerCase() === 'vi' || isVietnameseUser);
-
   const allowedStatKeysByType = useMemo(
     () => ({
       exhaust: ['powerHp', 'torqueNm', 'weightKg', 'topSpeedKph'],
@@ -163,15 +128,38 @@ const OptionsPanel = ({
     const base = baseSpecs && typeof baseSpecs === 'object' ? baseSpecs : {};
     const bonus = bonusSpecs && typeof bonusSpecs === 'object' ? bonusSpecs : {};
     const allowed = allowedKeysForType(activeType);
-    const toNumOrNull = (v) => {
+    const parseNumberFlexible = (v) => {
       if (v === null || v === undefined || v === '') return null;
-      const n = Number(v);
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      const raw = String(v || '').trim();
+      if (!raw) return null;
+      const match = raw.replace(/\s+/g, '').match(/-?[\d.,]+/);
+      if (!match) return null;
+      let token = String(match[0] || '');
+      if (token.includes('.') && token.includes(',')) {
+        const lastDot = token.lastIndexOf('.');
+        const lastComma = token.lastIndexOf(',');
+        if (lastComma > lastDot) token = token.replace(/\./g, '').replace(',', '.');
+        else token = token.replace(/,/g, '');
+      } else if (token.includes(',')) {
+        const parts = token.split(',');
+        if (parts.length === 2 && parts[1].length === 3) token = parts.join('');
+        else if (parts.length === 2) token = `${parts[0]}.${parts[1]}`;
+        else token = parts.join('');
+      } else if (token.includes('.')) {
+        const parts = token.split('.');
+        if (parts.length > 2) {
+          const last = parts[parts.length - 1];
+          if (last.length === 3) token = parts.join('');
+          else token = `${parts.slice(0, -1).join('')}.${last}`;
+        }
+      }
+      const n = Number(token);
       return Number.isFinite(n) ? n : null;
     };
-    const toNumOr0 = (v) => {
-      if (v === null || v === undefined || v === '') return 0;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : 0;
+    const toNumOr0Flexible = (v) => {
+      const n = parseNumberFlexible(v);
+      return n === null ? 0 : n;
     };
     const rows = [
       { key: 'powerHp', label: t('cfg_stat_power'), unit: 'Hp' },
@@ -180,8 +168,8 @@ const OptionsPanel = ({
       { key: 'topSpeedKph', label: t('cfg_stat_top_speed'), unit: 'Km/h' },
       { key: 'fuelL', label: t('cfg_stat_fuel'), unit: 'L' }
     ].map((r) => {
-      const b = toNumOrNull(base[r.key]);
-      const d = toNumOr0(bonus[r.key]);
+      const b = parseNumberFlexible(base[r.key]);
+      const d = toNumOr0Flexible(bonus[r.key]);
       const hasBase = b !== null;
       const hasDelta = Math.abs(d) > 0.000001;
       const after = hasBase ? b + d : null;
@@ -198,47 +186,65 @@ const OptionsPanel = ({
   }, [activeType, allowedKeysForType, baseSpecs, bonusSpecs, selected, t]);
 
   useEffect(() => {
-    setLawError('');
-    setLawResult(null);
-    setLawOpen(false);
-  }, [selected]);
-
-  useEffect(() => {
     setCompareOpen(false);
   }, [selected, activeType]);
 
-  const statusLabel = (status) => {
-    const s = String(status || '').trim();
-    return lawUiVi.status[s] || lawUiVi.status.warning;
-  };
-
-  const statusCls = (status) => {
-    const s = String(status || '').trim();
-    if (s === 'legal') return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200';
-    if (s === 'illegal') return 'border-red-500/25 bg-red-500/10 text-red-200';
-    return 'border-amber-500/25 bg-amber-500/10 text-amber-200';
-  };
-
-  const onCheck = async () => {
-    if (!canCheck || lawLoading) return;
+  useEffect(() => {
+    let alive = true;
+    const type = String(activeType || '').trim();
+    const name = String(selectedPartName || '').trim();
+    const bike = String(motorcycleName || '').trim();
+    if (!selected || !type || !name) {
+      setLawLoading(false);
+      setLawError('');
+      setLawResult(null);
+      return () => {
+        alive = false;
+      };
+    }
     setLawLoading(true);
     setLawError('');
-    try {
-      const data = await checkModLegality({
-        motorcycle: String(motorcycleName || '').trim(),
-        partName: selectedPartName,
-        partType: String(activeType || '').trim()
+    setLawResult(null);
+    checkModLegality({ motorcycle: bike, partName: name, partType: type })
+      .then((data) => {
+        if (!alive) return;
+        const res = data && typeof data === 'object' ? data : null;
+        if (!res) {
+          setLawError('FAILED');
+          return;
+        }
+        setLawResult({
+          status: String(res?.status || '').trim(),
+          label_vi: String(res?.label_vi || '').trim(),
+          reason: String(res?.reason || '').trim(),
+          fine: String(res?.fine || '').trim(),
+          alternatives: Array.isArray(res?.alternatives) ? res.alternatives.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 3) : []
+        });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setLawError(String(e?.message || 'FAILED').trim() || 'FAILED');
+      })
+      .finally(() => {
+        if (!alive) return;
+        setLawLoading(false);
       });
-      setLawResult(data && typeof data === 'object' ? data : null);
-      setLawOpen(true);
-    } catch (e) {
-      setLawResult(null);
-      setLawOpen(true);
-      setLawError(e?.message || 'REQUEST_FAILED');
-    } finally {
-      setLawLoading(false);
-    }
-  };
+    return () => {
+      alive = false;
+    };
+  }, [activeType, motorcycleName, selected, selectedPartName]);
+
+  const lawUi = useMemo(() => {
+    const status = String(lawResult?.status || '').trim().toLowerCase();
+    const label = String(lawResult?.label_vi || '').trim() || (status === 'legal' ? 'Hợp pháp' : status === 'illegal' ? 'Vi phạm luật' : 'Có nguy cơ bị phạt');
+    const theme =
+      status === 'legal'
+        ? { border: 'border-emerald-400/25', bg: 'bg-emerald-500/10', text: 'text-emerald-100' }
+        : status === 'illegal'
+          ? { border: 'border-rose-400/25', bg: 'bg-rose-500/10', text: 'text-rose-100' }
+          : { border: 'border-amber-400/25', bg: 'bg-amber-500/10', text: 'text-amber-100' };
+    return { status, label, theme };
+  }, [lawResult]);
 
   return (
     <div className="h-full overflow-hidden border-l border-white/10 bg-white/[0.03]">
@@ -376,73 +382,62 @@ const OptionsPanel = ({
               </div>
             ) : null}
 
-          </div>
+            {selected ? (
+              <div className={`rounded-2xl border p-3 ${lawUi.theme.border} ${lawUi.theme.bg}`}>
+                <button type="button" onClick={() => setLawOpen((v) => !v)} className="flex w-full items-start justify-between gap-3 text-left">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-black tracking-wide text-white/80">Cảnh báo vi phạm giao thông (VN)</div>
+                    <div className={`mt-1 truncate text-[11px] font-semibold ${lawUi.theme.text}`}>
+                      {lawLoading ? 'Đang kiểm tra…' : lawError ? 'Không thể kiểm tra lúc này' : lawUi.label}
+                    </div>
+                    {!lawLoading && !lawError && lawResult?.reason ? (
+                      <div className="mt-1 line-clamp-2 text-[10px] text-white/65">{String(lawResult.reason || '').trim()}</div>
+                    ) : null}
+                  </div>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 bg-black/20 text-white/80 transition hover:bg-black/30">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      style={{ transform: lawOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }}
+                    >
+                      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                </button>
 
-          {canShowLawCheck ? (
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-[11px] font-semibold text-white/60">{lawUiVi.title}</div>
-                  <div className="truncate text-[10px] text-white/45">{lawUiVi.basisHint}</div>
-                  <div className="truncate text-[13px] font-semibold text-white">{selectedPartName || subtitle || '-'}</div>
-                </div>
-                {lawResult?.status ? (
-                  <div className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold ${statusCls(lawResult.status)}`}>
-                    {String(lawResult?.label_vi || '').trim() || statusLabel(lawResult.status)}
+                {lawOpen ? (
+                  <div className="mt-3 space-y-2">
+                    {lawError ? (
+                      <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] font-semibold text-white/75">{lawError}</div>
+                    ) : null}
+                    {!lawLoading && !lawError && lawResult?.fine ? (
+                      <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-white/75">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Mức phạt / căn cứ</div>
+                        <div className="mt-1">{String(lawResult.fine || '').trim()}</div>
+                      </div>
+                    ) : null}
+                    {!lawLoading && !lawError && Array.isArray(lawResult?.alternatives) && lawResult.alternatives.length ? (
+                      <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-white/75">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Gợi ý giảm rủi ro</div>
+                        <div className="mt-1 space-y-1">
+                          {lawResult.alternatives.map((x) => (
+                            <div key={x} className="text-[11px] text-white/75">
+                              - {x}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
+            ) : null}
+          </div>
 
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onCheck}
-                  disabled={!canCheck || lawLoading}
-                  className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-400 to-cyan-300 px-3 py-2 text-[11px] font-black text-zinc-950 transition hover:brightness-110 disabled:opacity-60"
-                >
-                  {lawLoading ? t('auth_processing') : lawUiVi.checkBtn}
-                </button>
-                {(lawResult || lawError) ? (
-                  <button
-                    type="button"
-                    onClick={() => setLawOpen((v) => !v)}
-                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/80 hover:bg-white/10"
-                  >
-                    {lawOpen ? lawUiVi.less : lawUiVi.more}
-                  </button>
-                ) : null}
-              </div>
-
-              {lawOpen ? (
-                <div className="mt-3 space-y-2">
-                  {lawError ? (
-                    <div className="rounded-xl border border-red-900/40 bg-red-950/30 px-3 py-2 text-[11px] text-red-200">{lawError}</div>
-                  ) : null}
-                  {lawResult?.reason ? (
-                    <div className="text-[11px] leading-relaxed text-white/75">{String(lawResult.reason)}</div>
-                  ) : null}
-                  {lawResult?.fine ? (
-                    <div className="text-[11px] text-white/60">
-                      <span className="font-semibold text-white/75">{lawUiVi.fineLabel}: </span>
-                      {String(lawResult.fine)}
-                    </div>
-                  ) : null}
-                  {Array.isArray(lawResult?.alternatives) && lawResult.alternatives.length ? (
-                    <div className="text-[11px] text-white/70">
-                      <div className="font-semibold text-white/75">{lawUiVi.alternativesLabel}</div>
-                      <div className="mt-1 space-y-1">
-                        {lawResult.alternatives.slice(0, 3).map((a) => (
-                          <div key={a} className="text-white/65">
-                            - {String(a)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">

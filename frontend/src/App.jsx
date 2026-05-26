@@ -23,7 +23,6 @@ import AdminCars from './pages/AdminCars.jsx';
 import AdminShadow from './pages/AdminShadow.jsx';
 import AdminTickets from './pages/AdminTickets.jsx';
 import AdminFinance from './pages/AdminFinance.jsx';
-import AdminAnchorEditor from './pages/AdminAnchorEditor.jsx';
 import AdminSecurity from './pages/AdminSecurity.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Custom from './pages/Custom.jsx';
@@ -522,16 +521,6 @@ const App = () => {
                 <Page>
                   <AdminCars />
                 </Page>
-              }
-            />
-            <Route
-              path="/admin/anchors/:carId"
-              element={
-                <RequireAdmin>
-                  <Page>
-                    <AdminAnchorEditor />
-                  </Page>
-                </RequireAdmin>
               }
             />
             <Route

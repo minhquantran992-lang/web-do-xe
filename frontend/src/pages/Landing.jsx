@@ -131,11 +131,11 @@ const Landing = () => {
                   <img
                     src="/logo-mark.png"
                     alt="ELORIDE"
-                    className="h-24 w-24 shrink-0 select-none drop-shadow-[0_18px_40px_rgba(56,189,248,0.35)]"
+                    className="h-12 w-12 shrink-0 select-none drop-shadow-[0_18px_40px_rgba(56,189,248,0.35)]"
                     draggable={false}
                   />
                   <span className="min-w-0 text-left">
-                    <span className="block text-[18px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
+                    <span className="block text-[16px] font-black leading-none tracking-[0.28em] text-white">ELORIDE</span>
                     <span className="mt-1 block text-[9px] font-semibold leading-none tracking-[0.22em] text-white/70">
                       MOD YOUR RIDE | SYSTEM CUSTOMS
                     </span>
@@ -351,29 +351,44 @@ const Landing = () => {
           <div className="text-sm text-zinc-400">{t('lp_section_desc')}</div>
         </div>
         <div className="grid gap-5 md:grid-cols-3">
-          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
+          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-7 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
             <div className="pointer-events-none absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
               <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-sky-500/10 blur-[80px]" />
             </div>
-            <div className="relative text-xs font-semibold text-zinc-400">01</div>
-            <div className="mt-2 text-sm font-semibold text-zinc-100">{t('lp_step1_title')}</div>
-            <div className="mt-2 text-sm text-zinc-300">{t('lp_step1_desc')}</div>
+            <div className="relative flex items-start justify-between gap-3">
+              <span className="inline-flex items-center rounded-full border border-sky-400/25 bg-sky-500/10 px-2.5 py-1 text-[11px] font-black tracking-[0.22em] text-sky-100">
+                1
+              </span>
+            </div>
+            <div className="relative mt-4 text-lg font-black tracking-tight text-zinc-50">{t('lp_step1_title')}</div>
+            <div className="relative mt-2 text-sm leading-relaxed text-zinc-300">{t('lp_step1_desc')}</div>
+            <div className="pointer-events-none relative mt-6 h-px w-full bg-gradient-to-r from-sky-400/35 via-white/10 to-transparent opacity-70" />
           </div>
-          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
+          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-7 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
             <div className="pointer-events-none absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
               <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/10 blur-[80px]" />
             </div>
-            <div className="relative text-xs font-semibold text-zinc-400">02</div>
-            <div className="mt-2 text-sm font-semibold text-zinc-100">{t('lp_step2_title')}</div>
-            <div className="mt-2 text-sm text-zinc-300">{t('lp_step2_desc')}</div>
+            <div className="relative flex items-start justify-between gap-3">
+              <span className="inline-flex items-center rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-black tracking-[0.22em] text-cyan-100">
+                2
+              </span>
+            </div>
+            <div className="relative mt-4 text-lg font-black tracking-tight text-zinc-50">{t('lp_step2_title')}</div>
+            <div className="relative mt-2 text-sm leading-relaxed text-zinc-300">{t('lp_step2_desc')}</div>
+            <div className="pointer-events-none relative mt-6 h-px w-full bg-gradient-to-r from-cyan-400/35 via-white/10 to-transparent opacity-70" />
           </div>
-          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
+          <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-7 shadow-[0_22px_80px_-70px_rgba(0,0,0,0.95)] transition hover:-translate-y-1 hover:border-sky-400/25 hover:bg-white/10">
             <div className="pointer-events-none absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
               <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-indigo-500/10 blur-[80px]" />
             </div>
-            <div className="relative text-xs font-semibold text-zinc-400">03</div>
-            <div className="mt-2 text-sm font-semibold text-zinc-100">{t('lp_step3_title')}</div>
-            <div className="mt-2 text-sm text-zinc-300">{t('lp_step3_desc')}</div>
+            <div className="relative flex items-start justify-between gap-3">
+              <span className="inline-flex items-center rounded-full border border-indigo-400/25 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-black tracking-[0.22em] text-indigo-100">
+                3
+              </span>
+            </div>
+            <div className="relative mt-4 text-lg font-black tracking-tight text-zinc-50">{t('lp_step3_title')}</div>
+            <div className="relative mt-2 text-sm leading-relaxed text-zinc-300">{t('lp_step3_desc')}</div>
+            <div className="pointer-events-none relative mt-6 h-px w-full bg-gradient-to-r from-indigo-400/35 via-white/10 to-transparent opacity-70" />
           </div>
         </div>
 
@@ -414,7 +429,7 @@ const Landing = () => {
           </Link>
         </div>
 
-        {error ? <div className="rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">{error}</div> : null}
+        {error ? <div className="rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">{t(error)}</div> : null}
 
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {loading ? (

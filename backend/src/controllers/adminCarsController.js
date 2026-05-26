@@ -109,6 +109,10 @@ const normalizeNumberOrNull = (value) => {
 
 const normalizeText = (value) => String(value || '').trim();
 
+const normalizePlainObject = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+
+ 
+
 const normalizeSpecs = (raw) => {
   const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   return {

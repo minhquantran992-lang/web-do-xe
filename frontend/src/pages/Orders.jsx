@@ -12,6 +12,18 @@ const MotionLink = motion(Link);
 
 const MOTION_FAST = { duration: 0.18, ease: [0.2, 0.9, 0.2, 1] };
 
+const toLocalDateKey = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const todayKey = () => toLocalDateKey(new Date());
+
 const Ink = ({ x, y, size, k }) => {
   return (
     <span
@@ -77,7 +89,8 @@ const STATUS_META = Object.freeze({
   IN_PROGRESS: { label: 'Đang thi công', tone: 'blue', hint: '' },
   COMPLETED: { label: 'Hoàn tất', tone: 'green', hint: '' },
   CANCELLED: { label: 'Đã hủy', tone: 'red', hint: 'Đơn đã bị hủy' },
-  REJECTED: { label: 'Từ chối', tone: 'red', hint: 'Đơn đã bị hủy' }
+  REJECTED: { label: 'Từ chối', tone: 'red', hint: 'Đơn đã bị hủy' },
+  SHOP_REJECTED: { label: 'Shop từ chối', tone: 'red', hint: 'Shop từ chối nhận' }
 });
 
 const TAB_LIST = [
@@ -86,7 +99,7 @@ const TAB_LIST = [
   { key: TAB.QUOTED, label: 'Xác nhận', statuses: ['QUOTED'] },
   { key: TAB.IN_PROGRESS, label: 'Đang thi công', statuses: ['CONFIRMED', 'IN_PROGRESS'] },
   { key: TAB.COMPLETED, label: 'Hoàn tất', statuses: ['COMPLETED'] },
-  { key: TAB.CLOSED, label: 'Đã hủy / Từ chối', statuses: ['CANCELLED', 'REJECTED'] }
+  { key: TAB.CLOSED, label: 'Đã hủy / Từ chối', statuses: ['CANCELLED', 'REJECTED', 'SHOP_REJECTED'] }
 ];
 
 const SCOPE = Object.freeze({
@@ -570,6 +583,7 @@ const Orders = () => {
   const [bookingLoading, setBookingLoading] = useState(true);
   const [bookingError, setBookingError] = useState('');
   const [bookingTab, setBookingTab] = useState(BOOKING_TAB.ALL);
+  const [bookingDay, setBookingDay] = useState(() => todayKey());
 
   const flashOnce = useCallback((id) => {
     const k = String(id || '').trim();
@@ -742,9 +756,19 @@ const Orders = () => {
     return () => window.clearInterval(id);
   }, [busyId, fetchBookings, scope, token]);
 
+  const bookingDateFiltered = useMemo(() => {
+    const day = String(bookingDay || '').trim();
+    const base = Array.isArray(bookingItems) ? bookingItems : [];
+    if (!day) return base;
+    return base.filter((b) => {
+      const src = b?.timeSlot || b?.createdAt || b?.updatedAt || null;
+      return toLocalDateKey(src) === day;
+    });
+  }, [bookingDay, bookingItems]);
+
   const bookingCounts = useMemo(() => {
     const c = Object.fromEntries(BOOKING_TAB_LIST.map((t) => [t.key, 0]));
-    for (const b of Array.isArray(bookingItems) ? bookingItems : []) {
+    for (const b of bookingDateFiltered) {
       const s = String(b?.status || '').trim().toLowerCase();
       c[BOOKING_TAB.ALL] = (c[BOOKING_TAB.ALL] || 0) + 1;
       if (s === 'pending') c[BOOKING_TAB.PENDING] = (c[BOOKING_TAB.PENDING] || 0) + 1;
@@ -755,15 +779,15 @@ const Orders = () => {
       else if (s === 'cancelled' || s === 'rejected' || s === 'expired') c[BOOKING_TAB.CLOSED] = (c[BOOKING_TAB.CLOSED] || 0) + 1;
     }
     return c;
-  }, [bookingItems]);
+  }, [bookingDateFiltered]);
 
   const bookingFiltered = useMemo(() => {
     const tab = BOOKING_TAB_LIST.find((x) => x.key === bookingTab) || BOOKING_TAB_LIST[0];
     const statuses = tab?.statuses;
-    if (!statuses) return bookingItems;
+    if (!statuses) return bookingDateFiltered;
     const set = new Set(statuses);
-    return (Array.isArray(bookingItems) ? bookingItems : []).filter((b) => set.has(String(b?.status || '').trim().toLowerCase()));
-  }, [bookingItems, bookingTab]);
+    return bookingDateFiltered.filter((b) => set.has(String(b?.status || '').trim().toLowerCase()));
+  }, [bookingDateFiltered, bookingTab]);
 
   const onConfirmBooking = async (id) => {
     if (!token) return;
@@ -914,6 +938,35 @@ const Orders = () => {
         <div className="text-xs font-semibold tracking-[0.22em] text-sky-300/90">{t('orders_title')}</div>
         <h1 className="mt-2 text-2xl font-black tracking-tight text-zinc-50 sm:text-3xl">Yêu cầu lắp đặt</h1>
         <div className="mt-1 text-sm text-zinc-400">Theo dõi trạng thái, xem báo giá và xác nhận thi công.</div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+        <div className="flex items-center gap-3">
+          <div className="text-xs font-semibold text-zinc-400">Chọn ngày</div>
+          <input
+            type="date"
+            value={bookingDay}
+            onChange={(e) => setBookingDay(String(e.target.value || '').trim())}
+            className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm font-semibold text-zinc-100 outline-none focus:border-sky-400/40"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <InkButton
+            onClick={() => setBookingDay(todayKey())}
+            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-white/10"
+          >
+            Hôm nay
+          </InkButton>
+          <InkButton
+            onClick={() => setBookingDay('')}
+            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-white/10"
+          >
+            Tất cả ngày
+          </InkButton>
+          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-zinc-200">
+            {bookingFiltered.length} mục
+          </div>
+        </div>
       </div>
 
       <BookingTabs active={bookingTab} onChange={setBookingTab} counts={bookingCounts} />

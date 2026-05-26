@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { adminRequired } = require('../middleware/auth');
+const { validateAvatarFile, moderateImageFile } = require('../security/uploadValidation');
 const {
   listBrandsAdmin,
   createBrandAdmin,
@@ -63,10 +64,40 @@ const upload = multer({
   }
 });
 
+const validateBrandLogoUploaded = async (req, res, next) => {
+  const file = req.file;
+  if (!file?.path) return next();
+  const name = String(file?.originalname || '').toLowerCase();
+  if (name.endsWith('.svg')) return next();
+  try {
+    const checked = await validateAvatarFile({ filePath: file.path, originalName: file.originalname, maxBytes: 5 * 1024 * 1024 });
+    if (!checked.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      const status = checked.error === 'FILE_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: checked.error });
+    }
+    const mod = await moderateImageFile({ filePath: file.path, originalName: file.originalname });
+    if (!mod.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
+    }
+    return next();
+  } catch (e) {
+    try {
+      await fs.promises.unlink(file.path);
+    } catch {}
+    return next(e);
+  }
+};
+
 router.get('/', adminRequired, listBrandsAdmin);
 router.post('/', adminRequired, createBrandAdmin);
 router.patch('/:id', adminRequired, updateBrandAdmin);
-router.post('/upload-logo', adminRequired, upload.single('file'), uploadBrandLogoAdmin);
+router.post('/upload-logo', adminRequired, upload.single('file'), validateBrandLogoUploaded, uploadBrandLogoAdmin);
 router.post('/import-logo', adminRequired, importBrandLogoFromUrl);
 router.delete('/:id', adminRequired, deleteBrandAdmin);
 

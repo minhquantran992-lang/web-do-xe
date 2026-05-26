@@ -108,6 +108,14 @@ export const uploadAdminPartModel = async ({ token, file }) => {
   return data;
 };
 
+export const bulkAssignAdminPartCompatibleCars = async ({ token, partIds, compatibleCars }) => {
+  return apiFetch('/api/admin/parts/bulk-assign-compat', {
+    token,
+    method: 'POST',
+    body: { partIds: Array.isArray(partIds) ? partIds : [], compatibleCars: Array.isArray(compatibleCars) ? compatibleCars : [] }
+  });
+};
+
 export const getAdminBrands = async ({ token, vehicleType, type } = {}) => {
   const value = type ?? vehicleType;
   const qs = value ? `?vehicleType=${encodeURIComponent(value)}` : '';

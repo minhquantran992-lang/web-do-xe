@@ -5,10 +5,13 @@ import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
 import { useAuth } from '../services/auth/AuthContext.jsx';
 
+const IMG_FALLBACK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
 const resolveAssetUrl = (url) => {
   const base = getApiBaseUrl();
   const u = String(url || '').trim();
   if (!u) return '';
+  if (u.startsWith('data:') || u.startsWith('blob:')) return u;
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
   if (u.startsWith('/')) return `${base}${u}`;
   return `${base}/${u}`;
@@ -139,8 +142,12 @@ const BikeCard = ({ bike, typeLabel, t, onCustomize }) => {
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900">
         {image ? (
           <img
-            src={image}
+            src={resolveAssetUrl(image)}
             alt=""
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              e.currentTarget.src = IMG_FALLBACK;
+            }}
             className="h-full w-full origin-center object-cover transition duration-500 group-hover:scale-[1.06]"
           />
         ) : null}
@@ -681,7 +688,7 @@ const Bikes = () => {
           {loading ? <div className="text-zinc-400">{t('common_loading')}</div> : null}
           {error ? (
             <div className="text-red-400">
-              {t('common_error')}: {error}
+              {t('common_error')}: {t(error)}
             </div>
           ) : null}
 

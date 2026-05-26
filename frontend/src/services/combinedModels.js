@@ -61,23 +61,11 @@ export const resolveBestComboKey = ({ slotsOrder, modelMap, config }) => {
       const slot = nonStockSlots[0];
       const want = normalizeToken(desired?.[slot] || 'stock') || 'stock';
       if (want !== 'stock') {
-        let best = '';
-        let bestLen = -1;
         for (const key of candidates) {
-          const rawTokens = String(key || '').split('_');
-          if (rawTokens.length !== 1) continue;
-          const k = normalizeToken(rawTokens[0]) || '';
+          const k = normalizeToken(key) || '';
           if (!k || k === 'stock') continue;
           if (k === want) return key;
-          if (want.includes(k) || k.includes(want)) {
-            const score = k.length;
-            if (score > bestLen) {
-              bestLen = score;
-              best = key;
-            }
-          }
         }
-        if (best && map[best]) return best;
       }
     }
   }

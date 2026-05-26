@@ -4,7 +4,16 @@ const path = require('path');
 const multer = require('multer');
 
 const { requireVendorApproved } = require('../middleware/auth');
-const { listVendorOrders, getVendorOrderDetail, quoteOrder, startOrder, completeOrder, uploadOrderProof } = require('../controllers/vendorOrdersController');
+const { validateAvatarFile, moderateImageFile } = require('../security/uploadValidation');
+const {
+  listVendorOrders,
+  getVendorOrderDetail,
+  quoteOrder,
+  rejectOrder,
+  startOrder,
+  completeOrder,
+  uploadOrderProof
+} = require('../controllers/vendorOrdersController');
 
 const router = express.Router();
 
@@ -51,11 +60,40 @@ const uploadOne = (req, res, next) => {
   });
 };
 
+const validateProofUploaded = async (req, res, next) => {
+  const file = req.file;
+  if (!file?.path) return next();
+  try {
+    const checked = await validateAvatarFile({ filePath: file.path, originalName: file.originalname, maxBytes: 10 * 1024 * 1024 });
+    if (!checked.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      const status = checked.error === 'FILE_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: checked.error });
+    }
+    const mod = await moderateImageFile({ filePath: file.path, originalName: file.originalname });
+    if (!mod.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
+    }
+    return next();
+  } catch (e) {
+    try {
+      await fs.promises.unlink(file.path);
+    } catch {}
+    return next(e);
+  }
+};
+
 router.get('/', requireVendorApproved, listVendorOrders);
 router.get('/:id', requireVendorApproved, getVendorOrderDetail);
 router.post('/:id/quote', requireVendorApproved, quoteOrder);
+router.post('/:id/reject', requireVendorApproved, rejectOrder);
 router.post('/:id/start', requireVendorApproved, startOrder);
 router.post('/:id/complete', requireVendorApproved, completeOrder);
-router.post('/:id/upload-proof', requireVendorApproved, uploadOne, uploadOrderProof);
+router.post('/:id/upload-proof', requireVendorApproved, uploadOne, validateProofUploaded, uploadOrderProof);
 
 module.exports = router;

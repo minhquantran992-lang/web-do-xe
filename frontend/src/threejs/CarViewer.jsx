@@ -33,6 +33,7 @@ const FitCamera = ({ modelRef, controlsRef, initialCamera, onCamera, viewerMode 
   const { camera } = useThree();
   const fitTokenRef = useRef('');
   const isPreview = String(viewerMode || '').trim().toLowerCase() === 'preview';
+  const FRAMING_VERSION = 4;
 
   const emitCamera = () => {
     if (!onCamera) return;
@@ -76,7 +77,7 @@ const FitCamera = ({ modelRef, controlsRef, initialCamera, onCamera, viewerMode 
       return;
     }
 
-    const token = `${obj.uuid}`;
+    const token = `${obj.uuid}:${String(viewerMode || '').trim().toLowerCase()}:${initialCamera ? 'cam' : 'auto'}:${FRAMING_VERSION}`;
     if (fitTokenRef.current === token) return;
     fitTokenRef.current = token;
 
@@ -100,7 +101,7 @@ const FitCamera = ({ modelRef, controlsRef, initialCamera, onCamera, viewerMode 
     if (finalBox.isEmpty()) return;
     const size = finalBox.getSize(new Vector3());
     const maxAxis = Math.max(size.x, size.y, size.z);
-    const targetY = Math.max(0.05, size.y * (isPreview ? 0.33 : 0.35));
+    const targetY = Math.max(-0.25, size.y * (isPreview ? 0.02 : -0.04));
 
     if (controlsRef.current) {
       controlsRef.current.target.set(0, targetY, 0);
@@ -108,7 +109,7 @@ const FitCamera = ({ modelRef, controlsRef, initialCamera, onCamera, viewerMode 
     }
 
     const dist = Math.max(isPreview ? 1.15 : 1.8, maxAxis * (isPreview ? 1.45 : 2.1));
-    camera.position.set(dist * (isPreview ? 0.78 : 0.95), dist * (isPreview ? 0.34 : 0.45), dist * (isPreview ? 0.82 : 1));
+    camera.position.set(dist * (isPreview ? 0.82 : 0.98), dist * (isPreview ? 0.22 : 0.18), dist * (isPreview ? 0.9 : 1.18));
     camera.fov = isPreview ? 38 : 45;
     camera.near = 0.05;
     camera.far = 200;
@@ -289,6 +290,21 @@ const computeScaleFactorFixed = ({ accessory, type }) => {
   return { scaleFactor, maxDim, target: target.ideal };
 };
 
+const normalizeAccessoryPivotIfFar = (accessory) => {
+  if (!accessory) return false;
+  accessory.updateWorldMatrix(true, true);
+  const box = new Box3().setFromObject(accessory);
+  if (box.isEmpty()) return false;
+  const center = box.getCenter(new Vector3());
+  const size = box.getSize(new Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  if (!(maxDim > 0)) return false;
+  const dist = center.length();
+  if (!(dist > maxDim * 2)) return false;
+  accessory.position.sub(center);
+  return true;
+};
+
 const normalizeAndAttach = ({ accessory, anchor, slot, offsetKey, offsetsStore, debug }) => {
   if (!accessory || !anchor) return { applied: false, scaleFactor: 1 };
 
@@ -296,6 +312,7 @@ const normalizeAndAttach = ({ accessory, anchor, slot, offsetKey, offsetsStore, 
   accessory.position.set(0, 0, 0);
   accessory.quaternion.identity();
   accessory.scale.setScalar(1);
+  normalizeAccessoryPivotIfFar(accessory);
   anchor.add(accessory);
 
   // Scale FIRST (based on accessory size only), then apply position/rotation offset.
@@ -823,6 +840,7 @@ const BikeRig = ({
   const baseSceneRef = useRef(null);
   const anchorsRef = useRef(new Map());
   const attachmentsRef = useRef(new Map());
+  const lastSlotsRef = useRef([]);
   const pendingTokenRef = useRef(new Map());
   const meshesByCategoryRef = useRef(new Map());
   const meshCentersRef = useRef(new WeakMap());
@@ -1052,6 +1070,7 @@ const BikeRig = ({
     const root = rootRef.current;
     if (!root) return;
     const slotArr = Array.isArray(nextSlots) ? nextSlots : [];
+    const activeAttachments = attachmentsRef.current;
 
     const radiusByType = {
       exhaust: 0.45,
@@ -1067,6 +1086,7 @@ const BikeRig = ({
       const type = String(s?.type || '').trim();
       const key = String(s?.slot || type || '').trim();
       if (!type || !key) continue;
+      if (!activeAttachments.has(key)) continue;
       const category = type === 'tire' ? 'wheels' : type;
       const anchor = ensureAnchor(key, type, s?.socket);
       if (!anchor || !anchor.userData?.hasSocket) continue;
@@ -1196,10 +1216,9 @@ const BikeRig = ({
     if (!ready) return;
     // Lazy-load accessories only when selected; cache prevents re-downloading on re-select.
     const next = Array.isArray(slots) ? slots : [];
+    lastSlotsRef.current = next;
     const desired = new Map(next.map((s) => [String(s?.slot || s?.type || ''), s]).filter(([k]) => k));
     const cancels = new Map();
-
-    syncOriginalVisibility(next);
 
     for (const [key, obj] of attachmentsRef.current.entries()) {
       if (desired.has(key)) continue;
@@ -1211,6 +1230,7 @@ const BikeRig = ({
       const resolved = String(obj?.userData?.resolvedUrl || '').trim();
       if (resolved) releaseGLTF(resolved);
     }
+    syncOriginalVisibility(next);
     onAttachmentsChange?.(Array.from(attachmentsRef.current.keys()));
 
     for (const [key, s] of desired.entries()) {
@@ -1274,6 +1294,7 @@ const BikeRig = ({
           attachmentsRef.current.set(key, inst);
           onAttachmentObject?.(key, inst);
           onAttachmentsChange?.(Array.from(attachmentsRef.current.keys()));
+          syncOriginalVisibility(lastSlotsRef.current);
           emitMeta();
         } catch {}
       })();

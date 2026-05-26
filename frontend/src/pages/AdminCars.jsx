@@ -17,6 +17,7 @@ import {
   getAdminBackgrounds,
   getAdminCars,
   getAdminParts,
+  bulkAssignAdminPartCompatibleCars,
   uploadAdminCarModel,
   uploadAdminCarCombinedModel,
   deleteAdminCarCombinedModel,
@@ -58,6 +59,33 @@ const normalizeComboKey = (raw) =>
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 
+const isObjectId = (value) => /^[a-f0-9]{24}$/i.test(String(value || '').trim());
+const parseObjectIdList = (raw) => {
+  const list = String(raw || '')
+    .split(',')
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .filter(isObjectId);
+  const out = [];
+  const seen = new Set();
+  for (const id of list) {
+    const k = String(id).toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(id);
+  }
+  return out;
+};
+const toggleObjectIdInListString = (raw, id) => {
+  const target = String(id || '').trim();
+  if (!isObjectId(target)) return String(raw || '');
+  const list = parseObjectIdList(raw);
+  const idx = list.findIndex((x) => String(x).toLowerCase() === target.toLowerCase());
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(target);
+  return list.join(', ');
+};
+
 const AdminCars = () => {
   const { token, isAuthed } = useAuth();
   const { t } = useI18n();
@@ -92,7 +120,7 @@ const AdminCars = () => {
   const [showCarForm, setShowCarForm] = useState(true);
   const [showPartForm, setShowPartForm] = useState(true);
   const [showBgForm, setShowBgForm] = useState(false);
-  const [carForm, setCarForm] = useState({ name: '', brand: '', category: '', engineCc: '', image: '', model3d: '', co: '', hc: '', euroStandard: '' });
+  const [carForm, setCarForm] = useState({ name: '', brand: '', category: '', engineCc: '', image: '', model3d: '' });
   const [carCreateError, setCarCreateError] = useState('');
   const [carUploading, setCarUploading] = useState(false);
   const [carUploadError, setCarUploadError] = useState('');
@@ -114,10 +142,7 @@ const AdminCars = () => {
     topSpeedKph: '',
     fuelL: '',
     engineType: '',
-    gearbox: '',
-    co: '',
-    hc: '',
-    euroStandard: ''
+    gearbox: ''
   });
   const [anchorEditOpen, setAnchorEditOpen] = useState(false);
   const [anchorEditCarId, setAnchorEditCarId] = useState('');
@@ -144,48 +169,114 @@ const AdminCars = () => {
     type: 'wheels', 
     variantKey: '',
     thumbnailUrl: '', 
+    modelUrl: '',
+    anchorType: '',
+    compatibleCars: '',
     price: '',
     powerHp: '',
     torqueNm: '',
     weightKg: '',
     topSpeedKph: '',
-    coMultiplier: '',
-    hcMultiplier: '',
-    hasCatalytic: true
+    soundDb: '',
+    pipeDiameterMm: '',
+    hasDbKiller: false,
+    travelMm: '',
+    lengthMm: '',
+    preloadLevels: '',
+    reboundAdjust: false,
+    compressionAdjust: false,
+    rimFrontDiameterIn: '',
+    rimFrontWidthIn: '',
+    rimRearDiameterIn: '',
+    rimRearWidthIn: '',
+    tireFrontWidthMm: '',
+    tireFrontAspect: '',
+    tireFrontRimIn: '',
+    tireRearWidthMm: '',
+    tireRearAspect: '',
+    tireRearRimIn: '',
+    isTubeless: false,
+    discDiameterMm: '',
+    pistonCount: '',
+    masterCylinderMm: '',
+    barWidthMm: '',
+    barRiseMm: '',
+    volumeL: '',
+    maxLoadKg: '',
+    lumen: '',
+    colorTempK: '',
   });
   const [partCreateError, setPartCreateError] = useState('');
 
   const [partEditOpen, setPartEditOpen] = useState(false);
   const [partEditId, setPartEditId] = useState('');
   const [partEditError, setPartEditError] = useState('');
+  const [compatFixOpen, setCompatFixOpen] = useState(false);
+  const [compatFixCarId, setCompatFixCarId] = useState('');
+  const [compatFixType, setCompatFixType] = useState('');
+  const [compatFixSelected, setCompatFixSelected] = useState({});
+  const [compatFixError, setCompatFixError] = useState('');
   const [partEditForm, setPartEditForm] = useState({
     name: '',
     type: 'wheels',
     variantKey: '',
     thumbnailUrl: '',
+    modelUrl: '',
+    anchorType: '',
+    compatibleCars: '',
     price: '',
     powerHp: '',
     torqueNm: '',
     weightKg: '',
     topSpeedKph: '',
-    coMultiplier: '',
-    hcMultiplier: '',
-    hasCatalytic: true
+    soundDb: '',
+    pipeDiameterMm: '',
+    hasDbKiller: false,
+    travelMm: '',
+    lengthMm: '',
+    preloadLevels: '',
+    reboundAdjust: false,
+    compressionAdjust: false,
+    rimFrontDiameterIn: '',
+    rimFrontWidthIn: '',
+    rimRearDiameterIn: '',
+    rimRearWidthIn: '',
+    tireFrontWidthMm: '',
+    tireFrontAspect: '',
+    tireFrontRimIn: '',
+    tireRearWidthMm: '',
+    tireRearAspect: '',
+    tireRearRimIn: '',
+    isTubeless: false,
+    discDiameterMm: '',
+    pistonCount: '',
+    masterCylinderMm: '',
+    barWidthMm: '',
+    barRiseMm: '',
+    volumeL: '',
+    maxLoadKg: '',
+    lumen: '',
+    colorTempK: ''
   });
 
+  const booleanPartSpecKeys = useMemo(
+    () => new Set(['hasDbKiller', 'reboundAdjust', 'compressionAdjust', 'isTubeless']),
+    []
+  );
+
   const allowedPartSpecKeysByType = {
-    exhaust: ['powerHp', 'torqueNm', 'weightKg', 'topSpeedKph'],
+    exhaust: ['powerHp', 'torqueNm', 'weightKg', 'topSpeedKph', 'soundDb', 'pipeDiameterMm', 'hasDbKiller'],
     clutch: ['torqueNm'],
-    wheels: ['weightKg', 'topSpeedKph'],
-    brake: ['weightKg'],
-    suspension: ['weightKg'],
-    tire: ['topSpeedKph', 'weightKg'],
-    handlebar: ['weightKg'],
+    wheels: ['weightKg', 'topSpeedKph', 'rimFrontDiameterIn', 'rimFrontWidthIn', 'rimRearDiameterIn', 'rimRearWidthIn'],
+    brake: ['weightKg', 'discDiameterMm', 'pistonCount', 'masterCylinderMm'],
+    suspension: ['weightKg', 'travelMm', 'lengthMm', 'preloadLevels', 'reboundAdjust', 'compressionAdjust'],
+    tire: ['topSpeedKph', 'weightKg', 'tireFrontWidthMm', 'tireFrontAspect', 'tireFrontRimIn', 'tireRearWidthMm', 'tireRearAspect', 'tireRearRimIn', 'isTubeless'],
+    handlebar: ['weightKg', 'barWidthMm', 'barRiseMm'],
     bodykit: ['weightKg'],
     seat: ['weightKg'],
-    lighting: ['weightKg'],
+    lighting: ['weightKg', 'lumen', 'colorTempK'],
     throttle_housing: ['powerHp', 'torqueNm', 'topSpeedKph'],
-    topbox: ['weightKg']
+    topbox: ['weightKg', 'volumeL', 'maxLoadKg']
   };
 
   const getAllowedPartSpecKeys = (type) => allowedPartSpecKeysByType[String(type || '').trim()] || [];
@@ -223,11 +314,10 @@ const AdminCars = () => {
   const stripDisallowedPartSpecs = (form, nextType) => {
     const allowed = new Set(getAllowedPartSpecKeys(nextType));
     const out = { ...form, type: nextType };
-    const keys = ['powerHp', 'torqueNm', 'weightKg', 'topSpeedKph'];
+    const keys = [...new Set(Object.values(allowedPartSpecKeysByType).flat())];
     for (const k of keys) {
-      if (!allowed.has(k)) out[k] = '';
+      if (!allowed.has(k)) out[k] = booleanPartSpecKeys.has(k) ? false : '';
     }
-    if (String(nextType || '').trim() !== 'exhaust') out.hasCatalytic = true;
     return out;
   };
 
@@ -529,15 +619,10 @@ const AdminCars = () => {
           category: carForm.category,
           engineCc: toNumOrNull(carForm.engineCc),
           image: carForm.image,
-          model3d: carForm.model3d,
-          emissions: {
-            co: toNumOrNull(carForm.co),
-            hc: toNumOrNull(carForm.hc),
-            euroStandard: carForm.euroStandard
-          }
+          model3d: carForm.model3d
         }
       });
-      setCarForm({ name: '', brand: '', category: '', engineCc: '', image: '', model3d: '', co: '', hc: '', euroStandard: '' });
+      setCarForm({ name: '', brand: '', category: '', engineCc: '', image: '', model3d: '' });
       await load();
     } catch (err) {
       setCarCreateError(err?.message || 'CREATE_FAILED');
@@ -572,7 +657,6 @@ const AdminCars = () => {
 
   const openEditCar = (car) => {
     const s = car?.specs && typeof car.specs === 'object' ? car.specs : {};
-    const em = car?.emissions && typeof car.emissions === 'object' ? car.emissions : {};
     const slots = Array.isArray(car?.combinedModelSlots) ? car.combinedModelSlots : [];
     const models = car?.combinedModels && typeof car.combinedModels === 'object' ? car.combinedModels : {};
     const combosRaw = Array.isArray(car?.combos) ? car.combos : [];
@@ -622,10 +706,7 @@ const AdminCars = () => {
       topSpeedKph: s?.topSpeedKph === null || s?.topSpeedKph === undefined ? '' : String(s.topSpeedKph),
       fuelL: s?.fuelL === null || s?.fuelL === undefined ? '' : String(s.fuelL),
       engineType: String(s?.engineType || ''),
-      gearbox: String(s?.gearbox || ''),
-      co: em?.co === null || em?.co === undefined ? '' : String(em.co),
-      hc: em?.hc === null || em?.hc === undefined ? '' : String(em.hc),
-      euroStandard: String(em?.euroStandard || '')
+      gearbox: String(s?.gearbox || '')
     });
     setCarEditOpen(true);
   };
@@ -905,11 +986,6 @@ const AdminCars = () => {
             fuelL: toNumOrNull(carEditForm.fuelL),
             engineType: carEditForm.engineType,
             gearbox: carEditForm.gearbox
-          },
-          emissions: {
-            co: toNumOrNull(carEditForm.co),
-            hc: toNumOrNull(carEditForm.hc),
-            euroStandard: carEditForm.euroStandard
           }
         }
       });
@@ -1346,6 +1422,118 @@ const AdminCars = () => {
     }
   };
 
+  const partSpecFieldsByType = useMemo(
+    () => ({
+      exhaust: [
+        { key: 'powerHp', label: 'Tăng công suất (+HP)', kind: 'number', placeholder: 'VD: 5.5' },
+        { key: 'torqueNm', label: 'Tăng mô-men (+Nm)', kind: 'number' },
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number', placeholder: 'VD: -1.2' },
+        { key: 'topSpeedKph', label: 'Tăng tốc độ tối đa (+Km/h)', kind: 'number' },
+        { key: 'soundDb', label: 'Độ ồn (dB)', kind: 'number', placeholder: 'VD: 95' },
+        { key: 'pipeDiameterMm', label: 'Đường kính cổ pô (mm)', kind: 'number', placeholder: 'VD: 38' },
+        { key: 'hasDbKiller', label: 'Có DB killer', kind: 'boolean' }
+      ],
+      clutch: [{ key: 'torqueNm', label: 'Tăng mô-men (+Nm)', kind: 'number' }],
+      wheels: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number', placeholder: 'VD: -2.5' },
+        { key: 'rimFrontDiameterIn', label: 'Mâm trước: size (inch)', kind: 'number', placeholder: 'VD: 17' },
+        { key: 'rimFrontWidthIn', label: 'Mâm trước: rộng (inch)', kind: 'number', placeholder: 'VD: 2.75' },
+        { key: 'rimRearDiameterIn', label: 'Mâm sau: size (inch)', kind: 'number', placeholder: 'VD: 17' },
+        { key: 'rimRearWidthIn', label: 'Mâm sau: rộng (inch)', kind: 'number', placeholder: 'VD: 3.50' }
+      ],
+      suspension: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number', placeholder: 'VD: -1.0' },
+        { key: 'travelMm', label: 'Hành trình phuộc (mm)', kind: 'number', placeholder: 'VD: 120' },
+        { key: 'lengthMm', label: 'Chiều dài phuộc (mm)', kind: 'number', placeholder: 'VD: 320' },
+        { key: 'preloadLevels', label: 'Số nấc preload', kind: 'number', placeholder: 'VD: 20' },
+        { key: 'reboundAdjust', label: 'Có chỉnh rebound', kind: 'boolean' },
+        { key: 'compressionAdjust', label: 'Có chỉnh compression', kind: 'boolean' }
+      ],
+      tire: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number', placeholder: 'VD: -0.5' },
+        { key: 'topSpeedKph', label: 'Tăng tốc độ tối đa (+Km/h)', kind: 'number' },
+        { key: 'tireFrontWidthMm', label: 'Lốp trước: bề rộng (mm)', kind: 'number', placeholder: 'VD: 110' },
+        { key: 'tireFrontAspect', label: 'Lốp trước: profile (%)', kind: 'number', placeholder: 'VD: 70' },
+        { key: 'tireFrontRimIn', label: 'Lốp trước: size mâm (inch)', kind: 'number', placeholder: 'VD: 17' },
+        { key: 'tireRearWidthMm', label: 'Lốp sau: bề rộng (mm)', kind: 'number', placeholder: 'VD: 140' },
+        { key: 'tireRearAspect', label: 'Lốp sau: profile (%)', kind: 'number', placeholder: 'VD: 70' },
+        { key: 'tireRearRimIn', label: 'Lốp sau: size mâm (inch)', kind: 'number', placeholder: 'VD: 17' },
+        { key: 'isTubeless', label: 'Tubeless (không ruột)', kind: 'boolean' }
+      ],
+      brake: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' },
+        { key: 'discDiameterMm', label: 'Đường kính đĩa (mm)', kind: 'number', placeholder: 'VD: 320' },
+        { key: 'pistonCount', label: 'Số piston', kind: 'number', placeholder: 'VD: 4' },
+        { key: 'masterCylinderMm', label: 'Cỡ heo dầu (mm)', kind: 'number', placeholder: 'VD: 16' }
+      ],
+      handlebar: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' },
+        { key: 'barWidthMm', label: 'Bề ngang ghi đông (mm)', kind: 'number', placeholder: 'VD: 720' },
+        { key: 'barRiseMm', label: 'Độ nâng (mm)', kind: 'number', placeholder: 'VD: 40' }
+      ],
+      bodykit: [{ key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' }],
+      seat: [{ key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' }],
+      lighting: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' },
+        { key: 'lumen', label: 'Độ sáng (lumen)', kind: 'number', placeholder: 'VD: 3000' },
+        { key: 'colorTempK', label: 'Nhiệt màu (K)', kind: 'number', placeholder: 'VD: 6000' }
+      ],
+      throttle_housing: [
+        { key: 'powerHp', label: 'Tăng công suất (+HP)', kind: 'number' },
+        { key: 'torqueNm', label: 'Tăng mô-men (+Nm)', kind: 'number' },
+        { key: 'topSpeedKph', label: 'Tăng tốc độ tối đa (+Km/h)', kind: 'number' }
+      ],
+      topbox: [
+        { key: 'weightKg', label: 'Chênh trọng lượng (+/-Kg)', kind: 'number' },
+        { key: 'volumeL', label: 'Dung tích (L)', kind: 'number', placeholder: 'VD: 45' },
+        { key: 'maxLoadKg', label: 'Tải tối đa (Kg)', kind: 'number', placeholder: 'VD: 5' }
+      ]
+    }),
+    []
+  );
+
+  const renderPartSpecInputs = ({ type, form, setForm }) => {
+    const list = partSpecFieldsByType[String(type || '').trim()] || [];
+    if (!list.length) return null;
+    return (
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
+        <div className="mb-2 text-sm font-semibold text-zinc-200">Thông số phụ kiện</div>
+        <div className="grid gap-3 md:grid-cols-4">
+          {list.map((f) => {
+            const key = String(f?.key || '').trim();
+            if (!key) return null;
+            const kind = f?.kind === 'boolean' ? 'boolean' : 'number';
+            if (kind === 'boolean') {
+              return (
+                <label key={key} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form?.[key])}
+                    onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.checked }))}
+                    className="h-4 w-4"
+                  />
+                  <span className="font-medium">{String(f?.label || key)}</span>
+                </label>
+              );
+            }
+            return (
+              <label key={key} className="block">
+                <div className="mb-1 text-sm text-zinc-300">{String(f?.label || key)}</div>
+                <input
+                  value={form?.[key] ?? ''}
+                  onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+                  inputMode="decimal"
+                  placeholder={String(f?.placeholder || '')}
+                />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const onCreatePart = async (e) => {
     e.preventDefault();
     setPartCreateError('');
@@ -1354,14 +1542,13 @@ const AdminCars = () => {
       const allowedKeys = getAllowedPartSpecKeys(partForm.type);
       const specs = {};
       for (const key of allowedKeys) {
-        specs[key] = toNumOrNullFlexible(partForm[key]);
+        specs[key] = booleanPartSpecKeys.has(key) ? Boolean(partForm[key]) : toNumOrNullFlexible(partForm[key]);
       }
-      const emissions = {};
-      const coMul = toNumOrNullFlexible(partForm.coMultiplier);
-      const hcMul = toNumOrNullFlexible(partForm.hcMultiplier);
-      if (coMul !== null) emissions.coMultiplier = coMul;
-      if (hcMul !== null) emissions.hcMultiplier = hcMul;
-      if (String(partForm.type || '').trim() === 'exhaust') emissions.hasCatalytic = partForm.hasCatalytic !== false;
+      const compatibleCars = parseObjectIdList(partForm.compatibleCars);
+      if (!compatibleCars.length) {
+        setPartCreateError('Vui lòng chọn xe tương thích (không dùng phụ kiện chung chung).');
+        return;
+      }
 
       await createAdminPart({
         token,
@@ -1370,15 +1557,27 @@ const AdminCars = () => {
           type: partForm.type,
           variantKey: partForm.variantKey,
           thumbnailUrl: partForm.thumbnailUrl,
+          modelUrl: partForm.modelUrl,
+          anchorType: partForm.anchorType,
+          compatibleCars,
           price: partForm.price,
-          specs,
-          emissions
+          specs
         }
       });
       setPartForm({ 
         name: '', type: 'wheels', variantKey: '', thumbnailUrl: '', price: '',
+        modelUrl: '', anchorType: '', compatibleCars: '',
         powerHp: '', torqueNm: '', weightKg: '', topSpeedKph: '',
-        coMultiplier: '', hcMultiplier: '', hasCatalytic: true
+        soundDb: '', pipeDiameterMm: '', hasDbKiller: false,
+        travelMm: '', lengthMm: '', preloadLevels: '', reboundAdjust: false, compressionAdjust: false,
+        rimFrontDiameterIn: '', rimFrontWidthIn: '', rimRearDiameterIn: '', rimRearWidthIn: '',
+        tireFrontWidthMm: '', tireFrontAspect: '', tireFrontRimIn: '',
+        tireRearWidthMm: '', tireRearAspect: '', tireRearRimIn: '',
+        isTubeless: false,
+        discDiameterMm: '', pistonCount: '', masterCylinderMm: '',
+        barWidthMm: '', barRiseMm: '',
+        volumeL: '', maxLoadKg: '',
+        lumen: '', colorTempK: ''
       });
       await load();
     } catch (err) {
@@ -1402,10 +1601,50 @@ const AdminCars = () => {
     }
   };
 
+  const missingCompatParts = useMemo(() => {
+    const list = Array.isArray(parts) ? parts : [];
+    const type = String(compatFixType || '').trim();
+    return list
+      .filter((p) => (Array.isArray(p?.compatibleCars) ? p.compatibleCars.length === 0 : true))
+      .filter((p) => (!type ? true : String(p?.type || '').trim() === type));
+  }, [compatFixType, parts]);
+
+  const compatFixSelectedIds = useMemo(() => {
+    const ids = [];
+    const sel = compatFixSelected && typeof compatFixSelected === 'object' ? compatFixSelected : {};
+    for (const [id, on] of Object.entries(sel)) {
+      if (on) ids.push(String(id));
+    }
+    return ids;
+  }, [compatFixSelected]);
+
+  const applyCompatibilityFix = async ({ all = false } = {}) => {
+    const carId = String(compatFixCarId || '').trim();
+    if (!isObjectId(carId)) {
+      setCompatFixError('Vui lòng chọn xe.');
+      return;
+    }
+    const ids = all ? missingCompatParts.map((p) => String(p?._id || '')).filter(Boolean) : compatFixSelectedIds;
+    if (!ids.length) {
+      setCompatFixError('Vui lòng chọn phụ kiện cần gán.');
+      return;
+    }
+    setCompatFixError('');
+    setBusy(true);
+    try {
+      await bulkAssignAdminPartCompatibleCars({ token, partIds: ids, compatibleCars: [carId] });
+      await load();
+      setCompatFixSelected({});
+    } catch (e) {
+      setCompatFixError(e?.message || 'UPDATE_FAILED');
+    } finally {
+      setBusy(false);
+    }
+  };
+
 
   const openEditPart = (part) => {
     const s = part?.specs && typeof part.specs === 'object' ? part.specs : {};
-    const em = part?.emissions && typeof part.emissions === 'object' ? part.emissions : {};
     setPartEditError('');
     setPartEditId(String(part?._id || ''));
     setPartEditForm({
@@ -1413,14 +1652,42 @@ const AdminCars = () => {
       type: String(part?.type || 'wheels'),
       variantKey: String(part?.variantKey || ''),
       thumbnailUrl: String(part?.thumbnailUrl || ''),
+      modelUrl: String(part?.modelUrl || ''),
+      anchorType: String(part?.anchorType || ''),
+      compatibleCars: Array.isArray(part?.compatibleCars) ? part.compatibleCars.map((x) => String(x || '').trim()).filter(Boolean).join(', ') : '',
       price: part?.price === null || part?.price === undefined ? '' : String(part.price),
       powerHp: s?.powerHp === null || s?.powerHp === undefined ? '' : String(s.powerHp),
       torqueNm: s?.torqueNm === null || s?.torqueNm === undefined ? '' : String(s.torqueNm),
       weightKg: s?.weightKg === null || s?.weightKg === undefined ? '' : String(s.weightKg),
       topSpeedKph: s?.topSpeedKph === null || s?.topSpeedKph === undefined ? '' : String(s.topSpeedKph),
-      coMultiplier: em?.coMultiplier === null || em?.coMultiplier === undefined ? '' : String(em.coMultiplier),
-      hcMultiplier: em?.hcMultiplier === null || em?.hcMultiplier === undefined ? '' : String(em.hcMultiplier),
-      hasCatalytic: em?.hasCatalytic !== false
+      soundDb: s?.soundDb === null || s?.soundDb === undefined ? '' : String(s.soundDb),
+      pipeDiameterMm: s?.pipeDiameterMm === null || s?.pipeDiameterMm === undefined ? '' : String(s.pipeDiameterMm),
+      hasDbKiller: s?.hasDbKiller === true,
+      travelMm: s?.travelMm === null || s?.travelMm === undefined ? '' : String(s.travelMm),
+      lengthMm: s?.lengthMm === null || s?.lengthMm === undefined ? '' : String(s.lengthMm),
+      preloadLevels: s?.preloadLevels === null || s?.preloadLevels === undefined ? '' : String(s.preloadLevels),
+      reboundAdjust: s?.reboundAdjust === true,
+      compressionAdjust: s?.compressionAdjust === true,
+      rimFrontDiameterIn: s?.rimFrontDiameterIn === null || s?.rimFrontDiameterIn === undefined ? '' : String(s.rimFrontDiameterIn),
+      rimFrontWidthIn: s?.rimFrontWidthIn === null || s?.rimFrontWidthIn === undefined ? '' : String(s.rimFrontWidthIn),
+      rimRearDiameterIn: s?.rimRearDiameterIn === null || s?.rimRearDiameterIn === undefined ? '' : String(s.rimRearDiameterIn),
+      rimRearWidthIn: s?.rimRearWidthIn === null || s?.rimRearWidthIn === undefined ? '' : String(s.rimRearWidthIn),
+      tireFrontWidthMm: s?.tireFrontWidthMm === null || s?.tireFrontWidthMm === undefined ? '' : String(s.tireFrontWidthMm),
+      tireFrontAspect: s?.tireFrontAspect === null || s?.tireFrontAspect === undefined ? '' : String(s.tireFrontAspect),
+      tireFrontRimIn: s?.tireFrontRimIn === null || s?.tireFrontRimIn === undefined ? '' : String(s.tireFrontRimIn),
+      tireRearWidthMm: s?.tireRearWidthMm === null || s?.tireRearWidthMm === undefined ? '' : String(s.tireRearWidthMm),
+      tireRearAspect: s?.tireRearAspect === null || s?.tireRearAspect === undefined ? '' : String(s.tireRearAspect),
+      tireRearRimIn: s?.tireRearRimIn === null || s?.tireRearRimIn === undefined ? '' : String(s.tireRearRimIn),
+      isTubeless: s?.isTubeless === true,
+      discDiameterMm: s?.discDiameterMm === null || s?.discDiameterMm === undefined ? '' : String(s.discDiameterMm),
+      pistonCount: s?.pistonCount === null || s?.pistonCount === undefined ? '' : String(s.pistonCount),
+      masterCylinderMm: s?.masterCylinderMm === null || s?.masterCylinderMm === undefined ? '' : String(s.masterCylinderMm),
+      barWidthMm: s?.barWidthMm === null || s?.barWidthMm === undefined ? '' : String(s.barWidthMm),
+      barRiseMm: s?.barRiseMm === null || s?.barRiseMm === undefined ? '' : String(s.barRiseMm),
+      volumeL: s?.volumeL === null || s?.volumeL === undefined ? '' : String(s.volumeL),
+      maxLoadKg: s?.maxLoadKg === null || s?.maxLoadKg === undefined ? '' : String(s.maxLoadKg),
+      lumen: s?.lumen === null || s?.lumen === undefined ? '' : String(s.lumen),
+      colorTempK: s?.colorTempK === null || s?.colorTempK === undefined ? '' : String(s.colorTempK)
     });
     setPartEditOpen(true);
   };
@@ -1440,14 +1707,13 @@ const AdminCars = () => {
       const allowedKeys = getAllowedPartSpecKeys(partEditForm.type);
       const specs = {};
       for (const key of allowedKeys) {
-        specs[key] = toNumOrNullFlexible(partEditForm[key]);
+        specs[key] = booleanPartSpecKeys.has(key) ? Boolean(partEditForm[key]) : toNumOrNullFlexible(partEditForm[key]);
       }
-      const emissions = {};
-      const coMul = toNumOrNullFlexible(partEditForm.coMultiplier);
-      const hcMul = toNumOrNullFlexible(partEditForm.hcMultiplier);
-      if (coMul !== null) emissions.coMultiplier = coMul;
-      if (hcMul !== null) emissions.hcMultiplier = hcMul;
-      if (String(partEditForm.type || '').trim() === 'exhaust') emissions.hasCatalytic = partEditForm.hasCatalytic !== false;
+      const compatibleCars = parseObjectIdList(partEditForm.compatibleCars);
+      if (!compatibleCars.length) {
+        setPartEditError('Vui lòng chọn xe tương thích (không dùng phụ kiện chung chung).');
+        return;
+      }
       const updated = await updateAdminPart({
         token,
         id: partEditId,
@@ -1456,9 +1722,11 @@ const AdminCars = () => {
           type: partEditForm.type,
           variantKey: partEditForm.variantKey,
           thumbnailUrl: partEditForm.thumbnailUrl,
+          modelUrl: partEditForm.modelUrl,
+          anchorType: partEditForm.anchorType,
+          compatibleCars,
           price: toNumOrNullFlexible(partEditForm.price) ?? 0,
-          specs,
-          emissions
+          specs
         }
       });
       if (updated && updated._id) {
@@ -1925,6 +2193,112 @@ const AdminCars = () => {
           </tbody>
         </table>
       </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-zinc-100">Khắc phục phụ kiện chưa gán xe tương thích</div>
+          <button
+            type="button"
+            onClick={() => setCompatFixOpen((v) => !v)}
+            className="rounded bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700"
+          >
+            {compatFixOpen ? 'Ẩn' : 'Mở'} ({missingCompatParts.length})
+          </button>
+        </div>
+        {compatFixOpen ? (
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="block">
+                <div className="mb-1 text-xs font-semibold text-zinc-300">Chọn xe</div>
+                <select
+                  value={compatFixCarId}
+                  onChange={(e) => setCompatFixCarId(e.target.value)}
+                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
+                >
+                  <option value="">—</option>
+                  {cars.map((c) => (
+                    <option key={String(c?._id || '')} value={String(c?._id || '')}>
+                      {String(c?.name || '').trim() || String(c?._id || '')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-1 text-xs font-semibold text-zinc-300">Lọc type</div>
+                <select
+                  value={compatFixType}
+                  onChange={(e) => {
+                    setCompatFixType(e.target.value);
+                    setCompatFixSelected({});
+                  }}
+                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
+                >
+                  <option value="">Tất cả</option>
+                  <option value="exhaust">exhaust</option>
+                  <option value="wheels">wheels</option>
+                  <option value="bodykit">bodykit</option>
+                  <option value="seat">seat</option>
+                  <option value="tire">tire</option>
+                  <option value="brake">brake</option>
+                  <option value="suspension">suspension</option>
+                  <option value="handlebar">handlebar</option>
+                  <option value="lighting">lighting</option>
+                  <option value="topbox">topbox</option>
+                  <option value="clutch">clutch</option>
+                  <option value="tank">tank</option>
+                  <option value="headlight">headlight</option>
+                  <option value="throttle_housing">throttle_housing</option>
+                  <option value="frontWheel">frontWheel</option>
+                  <option value="rearWheel">rearWheel</option>
+                  <option value="chassis">chassis</option>
+                </select>
+              </label>
+              <div className="flex items-end justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => applyCompatibilityFix({ all: true })}
+                  className="rounded bg-sky-400 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-sky-300 disabled:opacity-60"
+                >
+                  Gán tất cả
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => applyCompatibilityFix({ all: false })}
+                  className="rounded bg-emerald-400 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  Gán đã chọn
+                </button>
+              </div>
+            </div>
+            {compatFixError ? <div className="text-sm text-red-400">{compatFixError}</div> : null}
+            <div className="max-h-[260px] overflow-auto rounded border border-zinc-800 bg-zinc-950">
+              {missingCompatParts.length ? (
+                <div className="divide-y divide-zinc-800">
+                  {missingCompatParts.map((p) => {
+                    const pid = String(p?._id || '');
+                    const checked = Boolean(compatFixSelected?.[pid]);
+                    return (
+                      <label key={pid} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-900/40">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setCompatFixSelected((prev) => ({ ...(prev || {}), [pid]: !checked }))}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{String(p?.name || '').trim() || pid}</span>
+                        <span className="shrink-0 rounded bg-white/5 px-2 py-0.5 text-xs text-zinc-300">{String(p?.type || '')}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="px-3 py-3 text-sm text-zinc-400">Không có phụ kiện nào bị thiếu.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
       </section>
       ) : null}
 
@@ -2039,41 +2413,6 @@ const AdminCars = () => {
             </div>
             {carUploading ? <div className="text-xs text-zinc-400">{t('admin_uploading_model')}</div> : null}
             {carUploadError ? <div className="text-xs text-red-400">{t('admin_upload_error')}{carUploadError}</div> : null}
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-          <div className="mb-2 text-sm font-semibold text-zinc-200">Khí thải (mô phỏng)</div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">CO (gốc)</div>
-              <input
-                value={carForm.co}
-                onChange={(e) => setCarForm((p) => ({ ...p, co: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-                placeholder="VD: 2.1"
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">HC (gốc)</div>
-              <input
-                value={carForm.hc}
-                onChange={(e) => setCarForm((p) => ({ ...p, hc: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="numeric"
-                placeholder="VD: 800"
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">Tiêu chuẩn Euro</div>
-              <input
-                value={carForm.euroStandard}
-                onChange={(e) => setCarForm((p) => ({ ...p, euroStandard: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                placeholder="Euro 4"
-              />
-            </label>
           </div>
         </div>
 
@@ -2231,41 +2570,6 @@ const AdminCars = () => {
                       onChange={(e) => setCarEditForm((p) => ({ ...p, engineType: e.target.value }))}
                       className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
                       placeholder="1-cylinder / V4 / Electric..."
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-                <div className="mb-2 text-sm font-semibold text-zinc-200">Khí thải (mô phỏng)</div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">CO (gốc)</div>
-                    <input
-                      value={carEditForm.co}
-                      onChange={(e) => setCarEditForm((p) => ({ ...p, co: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                      placeholder="VD: 2.1"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">HC (gốc)</div>
-                    <input
-                      value={carEditForm.hc}
-                      onChange={(e) => setCarEditForm((p) => ({ ...p, hc: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="numeric"
-                      placeholder="VD: 800"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">Tiêu chuẩn Euro</div>
-                    <input
-                      value={carEditForm.euroStandard}
-                      onChange={(e) => setCarEditForm((p) => ({ ...p, euroStandard: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      placeholder="Euro 4"
                     />
                   </label>
                 </div>
@@ -2691,12 +2995,6 @@ const AdminCars = () => {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => openAnchorEditor(c)}
-                      className="rounded bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-60"
-                    >Anchors</button>
-                    <button
-                      type="button"
-                      disabled={busy}
                       onClick={() => openEditCar(c)}
                       className="rounded bg-sky-600 px-3 py-1.5 text-xs text-white hover:bg-sky-500 disabled:opacity-60"
                     >{t('admin_edit_btn')}</button>
@@ -2762,6 +3060,11 @@ const AdminCars = () => {
               }}
               className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
             >
+              <option value="chassis">Chassis</option>
+              <option value="frontWheel">Front wheel</option>
+              <option value="rearWheel">Rear wheel</option>
+              <option value="tank">Tank</option>
+              <option value="headlight">Headlight</option>
               <option value="exhaust">{t('part_exhaust')}</option>
               <option value="clutch">{t('part_clutch')}</option>
               <option value="wheels">{t('part_wheels')}</option>
@@ -2794,6 +3097,50 @@ const AdminCars = () => {
               placeholder="https://...jpg"
             />
           </div>
+          <div className="space-y-1">
+            <div className="text-sm text-zinc-300">Model URL (.glb/.gltf)</div>
+            <input
+              value={partForm.modelUrl}
+              onChange={(e) => setPartForm((p) => ({ ...p, modelUrl: e.target.value }))}
+              className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+              placeholder="/assets/bikes/xsr155/exhaust.glb"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="text-sm text-zinc-300">Anchor type</div>
+            <input
+              value={partForm.anchorType}
+              onChange={(e) => setPartForm((p) => ({ ...p, anchorType: e.target.value }))}
+              className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+              placeholder="exhaust / frontWheel / rearWheel"
+            />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <div className="text-sm text-zinc-300">Compatible cars (comma-separated car IDs)</div>
+            <input
+              value={partForm.compatibleCars}
+              onChange={(e) => setPartForm((p) => ({ ...p, compatibleCars: e.target.value }))}
+              className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+              placeholder=""
+            />
+            <div className="text-xs text-zinc-500">Để trống = phụ kiện dùng chung (hiện cho mọi xe). Chọn xe bên dưới để giới hạn.</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {cars.map((c) => {
+                const cid = String(c?._id || '').trim();
+                const selected = parseObjectIdList(partForm.compatibleCars).some((x) => String(x).toLowerCase() === cid.toLowerCase());
+                return (
+                  <label key={cid} className="flex cursor-pointer items-center gap-2 rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-900/40">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => setPartForm((p) => ({ ...p, compatibleCars: toggleObjectIdInListString(p.compatibleCars, cid) }))}
+                    />
+                    <span className="truncate">{String(c?.name || '').trim() || cid}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
 
           <div className="space-y-1">
             <div className="text-sm text-zinc-300">{t('admin_price')}</div>
@@ -2805,97 +3152,6 @@ const AdminCars = () => {
               inputMode="numeric"
             />
             {partForm.price ? <div className="text-xs text-zinc-400">{formatVnd(partForm.price)}</div> : null}
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-          <div className="mb-2 text-sm font-semibold text-zinc-200">{t('admin_bonus_specs')}</div>
-          <div className="grid gap-3 md:grid-cols-4">
-            {getAllowedPartSpecKeys(partForm.type).includes('powerHp') ? (
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_power')}</div>
-              <input
-                value={partForm.powerHp}
-                onChange={(e) => setPartForm((p) => ({ ...p, powerHp: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-                placeholder="VD: 5.5"
-              />
-            </label>
-            ) : null}
-            {getAllowedPartSpecKeys(partForm.type).includes('torqueNm') ? (
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_torque')}</div>
-              <input
-                value={partForm.torqueNm}
-                onChange={(e) => setPartForm((p) => ({ ...p, torqueNm: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-              />
-            </label>
-            ) : null}
-            {getAllowedPartSpecKeys(partForm.type).includes('weightKg') ? (
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_weight')}</div>
-              <input
-                value={partForm.weightKg}
-                onChange={(e) => setPartForm((p) => ({ ...p, weightKg: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-                placeholder="VD: -2.5"
-              />
-            </label>
-            ) : null}
-            {getAllowedPartSpecKeys(partForm.type).includes('topSpeedKph') ? (
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">Max Speed (+Km/h)</div>
-              <input
-                value={partForm.topSpeedKph}
-                onChange={(e) => setPartForm((p) => ({ ...p, topSpeedKph: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-              />
-            </label>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-          <div className="mb-2 text-sm font-semibold text-zinc-200">Hệ số khí thải</div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">Hệ số CO</div>
-              <input
-                value={partForm.coMultiplier}
-                onChange={(e) => setPartForm((p) => ({ ...p, coMultiplier: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-                placeholder="VD: 2.5"
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-sm text-zinc-300">Hệ số HC</div>
-              <input
-                value={partForm.hcMultiplier}
-                onChange={(e) => setPartForm((p) => ({ ...p, hcMultiplier: e.target.value }))}
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                inputMode="decimal"
-                placeholder="VD: 2.0"
-              />
-            </label>
-            {String(partForm.type || '').trim() === 'exhaust' ? (
-              <label className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
-                <input
-                  type="checkbox"
-                  checked={partForm.hasCatalytic !== false}
-                  onChange={(e) => setPartForm((p) => ({ ...p, hasCatalytic: e.target.checked }))}
-                  className="h-4 w-4"
-                />
-                Có catalytic converter
-              </label>
-            ) : (
-              <div />
-            )}
           </div>
         </div>
 
@@ -2943,6 +3199,11 @@ const AdminCars = () => {
                     }}
                     className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
                   >
+                    <option value="chassis">Chassis</option>
+                    <option value="frontWheel">Front wheel</option>
+                    <option value="rearWheel">Rear wheel</option>
+                    <option value="tank">Tank</option>
+                    <option value="headlight">Headlight</option>
                     <option value="exhaust">{t('part_exhaust')}</option>
                     <option value="clutch">{t('part_clutch')}</option>
                     <option value="wheels">{t('part_wheels')}</option>
@@ -2975,6 +3236,55 @@ const AdminCars = () => {
                     placeholder="https://...jpg"
                   />
                 </label>
+                <label className="block md:col-span-2">
+                  <div className="mb-1 text-sm text-zinc-300">Model URL (.glb/.gltf)</div>
+                  <input
+                    value={partEditForm.modelUrl}
+                    onChange={(e) => setPartEditForm((p) => ({ ...p, modelUrl: e.target.value }))}
+                    className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+                    placeholder="/assets/bikes/xsr155/exhaust.glb"
+                  />
+                </label>
+                <label className="block">
+                  <div className="mb-1 text-sm text-zinc-300">Anchor type</div>
+                  <input
+                    value={partEditForm.anchorType}
+                    onChange={(e) => setPartEditForm((p) => ({ ...p, anchorType: e.target.value }))}
+                    className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+                    placeholder="exhaust / frontWheel / rearWheel"
+                  />
+                </label>
+                <label className="block md:col-span-2">
+                  <div className="mb-1 text-sm text-zinc-300">Compatible cars (comma-separated car IDs)</div>
+                  <input
+                    value={partEditForm.compatibleCars}
+                    onChange={(e) => setPartEditForm((p) => ({ ...p, compatibleCars: e.target.value }))}
+                    className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+                    placeholder=""
+                  />
+                  <div className="mt-1 text-xs text-zinc-500">Để trống = phụ kiện dùng chung (hiện cho mọi xe). Chọn xe bên dưới để giới hạn.</div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {cars.map((c) => {
+                      const cid = String(c?._id || '').trim();
+                      const selected = parseObjectIdList(partEditForm.compatibleCars).some((x) => String(x).toLowerCase() === cid.toLowerCase());
+                      return (
+                        <label
+                          key={cid}
+                          className="flex cursor-pointer items-center gap-2 rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-900/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() =>
+                              setPartEditForm((p) => ({ ...p, compatibleCars: toggleObjectIdInListString(p.compatibleCars, cid) }))
+                            }
+                          />
+                          <span className="truncate">{String(c?.name || '').trim() || cid}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </label>
                 <label className="block">
                   <div className="mb-1 text-sm text-zinc-300">{t('admin_price')}</div>
                   <input
@@ -2988,96 +3298,7 @@ const AdminCars = () => {
                 </label>
               </div>
 
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-                <div className="mb-2 text-sm font-semibold text-zinc-200">{t('admin_bonus_specs')}</div>
-                <div className="grid gap-3 md:grid-cols-4">
-                  {getAllowedPartSpecKeys(partEditForm.type).includes('powerHp') ? (
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_power')}</div>
-                    <input
-                      value={partEditForm.powerHp}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, powerHp: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                      placeholder="VD: 5.5"
-                    />
-                  </label>
-                  ) : null}
-                  {getAllowedPartSpecKeys(partEditForm.type).includes('torqueNm') ? (
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_torque')}</div>
-                    <input
-                      value={partEditForm.torqueNm}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, torqueNm: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                    />
-                  </label>
-                  ) : null}
-                  {getAllowedPartSpecKeys(partEditForm.type).includes('weightKg') ? (
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">{t('admin_bonus_weight')}</div>
-                    <input
-                      value={partEditForm.weightKg}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, weightKg: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                      placeholder="VD: -2.5"
-                    />
-                  </label>
-                  ) : null}
-                  {getAllowedPartSpecKeys(partEditForm.type).includes('topSpeedKph') ? (
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">Max Speed (+Km/h)</div>
-                    <input
-                      value={partEditForm.topSpeedKph}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, topSpeedKph: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                    />
-                  </label>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-                <div className="mb-2 text-sm font-semibold text-zinc-200">Hệ số khí thải</div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">Hệ số CO</div>
-                    <input
-                      value={partEditForm.coMultiplier}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, coMultiplier: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                      placeholder="VD: 2.5"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="mb-1 text-sm text-zinc-300">Hệ số HC</div>
-                    <input
-                      value={partEditForm.hcMultiplier}
-                      onChange={(e) => setPartEditForm((p) => ({ ...p, hcMultiplier: e.target.value }))}
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
-                      inputMode="decimal"
-                      placeholder="VD: 2.0"
-                    />
-                  </label>
-                  {String(partEditForm.type || '').trim() === 'exhaust' ? (
-                    <label className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
-                      <input
-                        type="checkbox"
-                        checked={partEditForm.hasCatalytic !== false}
-                        onChange={(e) => setPartEditForm((p) => ({ ...p, hasCatalytic: e.target.checked }))}
-                        className="h-4 w-4"
-                      />
-                      Có catalytic converter
-                    </label>
-                  ) : (
-                    <div />
-                  )}
-                </div>
-              </div>
+              {renderPartSpecInputs({ type: partEditForm.type, form: partEditForm, setForm: setPartEditForm })}
 
               {partEditError ? <div className="text-sm text-red-400">{t('admin_error')}{partEditError}</div> : null}
             </form>

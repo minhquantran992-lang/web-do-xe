@@ -26,6 +26,7 @@ const OrderDetail = () => {
   const statusLabelOf = useMemo(() => {
     const fallback = {
       REQUESTED: 'Yêu cầu báo giá',
+      SHOP_REJECTED: 'Shop từ chối nhận',
       QUOTED: 'Đã có báo giá (chờ khách xác nhận)',
       CONFIRMED: 'Khách đã xác nhận (chờ thi công)',
       IN_PROGRESS: 'Đang thi công',
@@ -90,7 +91,7 @@ const OrderDetail = () => {
   const quotedPrice = item?.quotedPrice ?? null;
   const quoteExpiresAt = item?.quoteExpiresAt || null;
 
-  const isTerminal = statusKey === 'CANCELLED' || statusKey === 'REJECTED';
+  const isTerminal = statusKey === 'CANCELLED' || statusKey === 'REJECTED' || statusKey === 'SHOP_REJECTED';
   const formatVnd = useMemo(() => {
     return (value) => {
       const n = Number(value);

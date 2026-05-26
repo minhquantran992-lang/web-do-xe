@@ -263,6 +263,11 @@ const Requests = () => {
       setToast(t('seller_toast_request_accepted'));
       window.setTimeout(() => setToast(''), 4000);
       setItems((prev) => (Array.isArray(prev) ? prev.filter((x) => String(x?._id || '') !== bid) : []));
+    } catch (e) {
+      const msg = String(e?.message || e?.data?.error || 'REQUEST_FAILED');
+      if (msg === 'QUOTE_REQUIRED') setToast(t('seller_requests_quote_required'));
+      else setToast(t(msg));
+      window.setTimeout(() => setToast(''), 3500);
     } finally {
       setBusyId('');
     }

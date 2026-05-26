@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const { requireVendorApproved } = require('../middleware/auth');
 const { requireVendorCarOwnership } = require('../middleware/vendorOwnership');
+const { validateAvatarFile, moderateImageFile } = require('../security/uploadValidation');
 const {
   listVendorCars,
   createVendorCar,
@@ -58,9 +59,49 @@ const upload = multer({
   }
 });
 
+const uploadOne = (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    const code = String(err?.code || '');
+    const msg = String(err?.message || '');
+    if (code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'FILE_TOO_LARGE' });
+    if (msg === 'INVALID_FILE_TYPE') return res.status(400).json({ error: 'INVALID_FILE_TYPE' });
+    if (msg.toLowerCase().includes('unexpected field')) return res.status(400).json({ error: 'INVALID_FORMDATA' });
+    return next(err);
+  });
+};
+
+const validateVendorCarImageUploaded = async (req, res, next) => {
+  const file = req.file;
+  if (!file?.path) return next();
+  try {
+    const checked = await validateAvatarFile({ filePath: file.path, originalName: file.originalname, maxBytes: 10 * 1024 * 1024 });
+    if (!checked.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      const status = checked.error === 'FILE_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: checked.error });
+    }
+    const mod = await moderateImageFile({ filePath: file.path, originalName: file.originalname });
+    if (!mod.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
+    }
+    return next();
+  } catch (e) {
+    try {
+      await fs.promises.unlink(file.path);
+    } catch {}
+    return next(e);
+  }
+};
+
 router.get('/', requireVendorApproved, listVendorCars);
 router.post('/', requireVendorApproved, createVendorCar);
-router.post('/upload-image', requireVendorApproved, upload.single('file'), uploadVendorCarImage);
+router.post('/upload-image', requireVendorApproved, uploadOne, validateVendorCarImageUploaded, uploadVendorCarImage);
 router.put('/:id', requireVendorApproved, requireVendorCarOwnership, updateVendorCar);
 router.delete('/:id', requireVendorApproved, requireVendorCarOwnership, deleteVendorCar);
 

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const mongoose = require('mongoose');
+const dns = require('dns').promises;
 
 const Vendor = require('../models/Vendor');
 const VendorReview = require('../models/VendorReview');
@@ -85,13 +86,23 @@ const normalizeForBlockedText = (value) =>
     .replace(/[^\p{L}\p{N}\s]/gu, '')
     .trim();
 
+const hasExplicitVietnameseProfanity = (value) => {
+  const raw = String(value || '');
+  if (!raw) return false;
+  const padded = ` ${raw} `;
+  if (/(^|[^\p{L}])chó([^\p{L}]|$)/iu.test(padded)) return true;
+  return false;
+};
+
 const isInappropriateText = (value) => {
+  if (hasExplicitVietnameseProfanity(value)) return true;
   const s = normalizeForBlockedText(value);
   if (!s) return false;
   const compact = s.replace(/\s+/g, '');
   const profanity = [
     /\b(fuck|shit|bitch|cunt|motherfucker)\b/i,
     /\b(dcm|dm)\b/i,
+    /\b(vcl|clm|vl)\b/i,
     /(địt|dit|đụ|du|lồn|lon|cặc|cac|cak|buồi|buoi)/i,
     /(chó\s*mày|cho\s*may)/i,
     /(dit|du|lon|cac|cak|buoi)/i
@@ -108,13 +119,77 @@ const isInappropriateText = (value) => {
   return false;
 };
 
+const checkPartnerEmail = asyncHandler(async (req, res) => {
+  const email = normalizeEmail(req.query?.email ?? req.body?.email);
+  if (!email) return res.status(400).json({ error: 'MISSING_EMAIL' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'INVALID_EMAIL' });
+  if (isInappropriateText(email)) return res.status(400).json({ error: 'EMAIL_INAPPROPRIATE' });
+
+  const [user, hasMx] = await Promise.all([
+    User.findOne({ email }).select('_id emailVerified').lean(),
+    (async () => {
+      const domain = String(email.split('@')[1] || '').trim();
+      if (!domain) return false;
+      try {
+        const records = await dns.resolveMx(domain);
+        return Array.isArray(records) && records.length > 0;
+      } catch {
+        return false;
+      }
+    })()
+  ]);
+
+  res.json({
+    ok: true,
+    email,
+    valid: true,
+    hasMx,
+    existsInSystem: Boolean(user?._id),
+    emailVerified: Boolean(user?.emailVerified)
+  });
+});
+
+const normalizeForNameHeuristics = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[\s\-_.]+/g, ' ')
+    .replace(/[^\p{L}\s]/gu, '')
+    .trim();
+
+const isNonsenseName = (value) => {
+  const s = normalizeForNameHeuristics(value);
+  if (!s) return false;
+  const compact = s.replace(/\s+/g, '');
+  const letters = compact.replace(/[^a-z]/g, '');
+  if (!letters) return false;
+
+  if (/^(test|testing|asdf|qwerty|zxcv|admin|user|unknown|null|none)$/i.test(letters)) return true;
+  if (/(qwerty|asdfgh|zxcvbn)/i.test(letters)) return true;
+  if (/([a-z])\1{3,}/i.test(letters)) return true;
+  if (letters.length >= 6 && !/[aeiouy]/i.test(letters)) return true;
+  if (letters.length >= 10) {
+    const vowelCount = (letters.match(/[aeiouy]/gi) || []).length;
+    if (vowelCount / letters.length < 0.2) return true;
+    const unique = new Set(letters.split('')).size;
+    if (unique / letters.length < 0.25) return true;
+  }
+  const parts = s.split(' ').filter(Boolean);
+  if (parts.length >= 2) {
+    const uniqParts = new Set(parts).size;
+    if (uniqParts === 1 && parts[0].length >= 2) return true;
+  }
+  return false;
+};
+
 const validateHumanName = (value) => {
   const raw = String(value || '').trim().replace(/\s+/g, ' ');
   if (!raw) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
   if (raw.length < 2 || raw.length > 80) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
   if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
   if (!/[\p{L}]/u.test(raw)) return { ok: false, error: 'INVALID_REPRESENTATIVE_NAME' };
-  if (isInappropriateText(raw)) return { ok: false, error: 'REPRESENTATIVE_NAME_INAPPROPRIATE' };
+  if (isInappropriateText(raw) || isNonsenseName(raw)) return { ok: false, error: 'REPRESENTATIVE_NAME_INAPPROPRIATE' };
   return { ok: true, value: raw };
 };
 
@@ -507,4 +582,11 @@ const grantVendorFromApplication = asyncHandler(async (req, res) => {
   return res.redirect(`${getFrontendUrl()}/dashboard`);
 });
 
-module.exports = { getVendorPublic, listPartneredVendors, submitPartnerApplication, grantVendorFromApplication, listVendorPostsPublic };
+module.exports = {
+  getVendorPublic,
+  listPartneredVendors,
+  checkPartnerEmail,
+  submitPartnerApplication,
+  grantVendorFromApplication,
+  listVendorPostsPublic
+};

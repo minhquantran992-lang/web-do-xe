@@ -4,7 +4,7 @@ import { useAuth } from '../services/auth/AuthContext.jsx';
 import { deleteConfiguration, getMyConfigurations, setConfigurationPublic } from '../services/api/configurations.js';
 import { useI18n } from '../services/i18n.jsx';
 import CarViewer from '../threejs/CarViewer.jsx';
-import { normalizeVariantKey, resolveBestComboKey } from '../services/combinedModels.js';
+import { makeComboKey, normalizeVariantKey, resolveBestComboKey } from '../services/combinedModels.js';
 
 const pickMountCandidates = (mount) => {
   const m = String(mount || '').trim();
@@ -185,24 +185,43 @@ const MyConfigurations = () => {
         comboConfig[type] = normalizeVariantKey(p?.variantKey || p?.name || '') || 'stock';
       }
 
-      const key = resolveBestComboKey({ slotsOrder: order, modelMap, config: comboConfig });
-      const url = key ? String(modelMap[key] || '').trim() : '';
-      if (!url) return { url: '', covered: [] };
+      const tokenByType = (type) => normalizeVariantKey(comboConfig?.[type] || 'stock') || 'stock';
 
-      const tokens = String(key || '').split('_');
-      const coveredByKey = order.filter((slot, idx) => String(tokens[idx] || 'stock') !== 'stock');
-      if (tokens.length < order.length) {
-        const nonStock = order.filter((slot) => (normalizeVariantKey(comboConfig?.[slot] || 'stock') || 'stock') !== 'stock');
-        if (nonStock.length === 1) return { url, covered: nonStock };
+      const exactKey = makeComboKey({ slotsOrder: order, config: comboConfig });
+      const exactUrl = exactKey ? String(modelMap[exactKey] || '').trim() : '';
+      const nonStockOrder = order.filter((slot) => tokenByType(slot) !== 'stock');
+      if (exactUrl && nonStockOrder.length) return { url: exactUrl, covered: nonStockOrder };
+
+      const selectedTypes = [];
+      if (wheels) selectedTypes.push('wheels');
+      for (const p of parts) {
+        const type = String(p?.type || '').trim();
+        if (type && !selectedTypes.includes(type)) selectedTypes.push(type);
       }
-      return { url, covered: coveredByKey };
+
+      const priorities = ['exhaust', 'wheels', 'tire', 'bodykit', 'topbox', 'handlebar', 'seat', 'lighting', 'brake', 'suspension', 'throttle_housing', 'clutch'];
+      const candidates = [...priorities.filter((x) => selectedTypes.includes(x)), ...selectedTypes.filter((x) => !priorities.includes(x))];
+      for (const type of candidates) {
+        const slot = String(type || '').trim();
+        const token = tokenByType(slot);
+        if (!token || token === 'stock') continue;
+        const best = resolveBestComboKey({ slotsOrder: [slot], modelMap, config: { [slot]: token } });
+        const url = best ? String(modelMap[best] || '').trim() : '';
+        if (!url) continue;
+        return { url, covered: [slot] };
+      }
+
+      return { url: '', covered: [] };
     }, [config]);
 
     const effectiveCarModelUrl = combined.url || baseCarModelUrl;
 
+    const anchorPreset = useMemo(() => {
+      return Array.isArray(config?.carId?.anchors) ? config.carId.anchors : [];
+    }, [config?.carId?.anchors]);
+
     const slots = useMemo(() => {
       const out = [];
-
       const addPartSlots = (type, part) => {
         const url = String(part?.modelUrl || '').trim();
         if (!type || !url) return;
@@ -251,6 +270,7 @@ const MyConfigurations = () => {
             slots={slots}
             accessoryColors={accessoryColors}
             initialCamera={initialCamera}
+            anchorPreset={anchorPreset}
             background="transparent"
             viewerMode="preview"
           />

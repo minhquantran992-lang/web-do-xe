@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../services/auth/AuthContext.jsx';
 import { getApiBaseUrl } from '../../services/api/client.js';
-import { completeVendorOrder, getVendorOrderDetail, listVendorOrders, quoteVendorOrder, startVendorOrder, uploadVendorOrderProof } from '../../services/api/orders.js';
+import {
+  completeVendorOrder,
+  getVendorOrderDetail,
+  listVendorOrders,
+  quoteVendorOrder,
+  rejectVendorOrder,
+  startVendorOrder,
+  uploadVendorOrderProof
+} from '../../services/api/orders.js';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -42,6 +50,7 @@ const Orders = () => {
   const labelOf = useCallback((key) => {
     const fallback = {
       REQUESTED: 'Yêu cầu báo giá',
+      SHOP_REJECTED: 'Shop từ chối nhận',
       QUOTED: 'Đã có báo giá (chờ khách xác nhận)',
       CONFIRMED: 'Khách đã xác nhận (chờ thi công)',
       IN_PROGRESS: 'Đang thi công',
@@ -118,6 +127,7 @@ const Orders = () => {
   const currentIdx = Number(detail?.currentStepIndex) || 0;
   const statusKey = String(detail?.status || '').trim();
   const canQuote = Boolean(detail && statusKey === 'REQUESTED');
+  const canReject = Boolean(detail && statusKey === 'REQUESTED');
   const canStart = Boolean(detail && statusKey === 'CONFIRMED');
   const canComplete = Boolean(detail && statusKey === 'IN_PROGRESS');
 
@@ -238,6 +248,8 @@ const Orders = () => {
                   </div>
                 ) : statusKey === 'REJECTED' ? (
                   <div className="mt-2 text-sm text-rose-200">Khách đã từ chối báo giá.</div>
+                ) : statusKey === 'SHOP_REJECTED' ? (
+                  <div className="mt-2 text-sm text-rose-200">Shop đã từ chối nhận đơn.</div>
                 ) : statusKey === 'CANCELLED' ? (
                   <div className="mt-2 text-sm text-rose-200">Đơn đã bị hủy.</div>
                 ) : statusKey === 'COMPLETED' ? (
@@ -295,6 +307,36 @@ const Orders = () => {
                     >
                       {saving ? 'Đang gửi...' : 'Gửi báo giá'}
                     </button>
+                    {canReject ? (
+                      <button
+                        type="button"
+                        disabled={saving || uploading}
+                        onClick={async () => {
+                          if (!token || !selectedId) return;
+                          const reason = String(window.prompt('Lý do từ chối (tối thiểu 3 ký tự):', '') || '').trim();
+                          if (reason.length < 3) {
+                            setToast('Vui lòng nhập lý do từ chối (tối thiểu 3 ký tự).');
+                            window.setTimeout(() => setToast(''), 3500);
+                            return;
+                          }
+                          setSaving(true);
+                          try {
+                            await rejectVendorOrder({ token, id: selectedId, reason });
+                            setToast('Đã từ chối yêu cầu.');
+                            window.setTimeout(() => setToast(''), 3500);
+                            await loadDetail({ id: selectedId });
+                            await loadList({ silent: true });
+                          } catch (err) {
+                            setToast(String(err?.message || 'FAILED_TO_SAVE'));
+                            window.setTimeout(() => setToast(''), 3500);
+                          }
+                          setSaving(false);
+                        }}
+                        className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-60"
+                      >
+                        Từ chối
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 

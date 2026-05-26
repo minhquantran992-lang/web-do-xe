@@ -1,0 +1,27 @@
+Tóm tắt refactor logic core (flow custom → báo giá → thi công)
+
+1) Chuẩn hoá flow & chống nhảy trạng thái (Backend)
+- Booking: shop nhận yêu cầu bắt buộc phải có báo giá (quote) trước; user chỉ xác nhận/từ chối khi đã có báo giá.
+- Order: bổ sung trạng thái mở rộng để scale theo flow chuẩn (SHOP_REJECTED, QUALITY_CHECK, DISPUTED...); không phá trạng thái cũ đang chạy.
+- Vendor Order: thêm API shop từ chối nhận đơn Order: POST /api/vendor/orders/:id/reject.
+
+2) Chuẩn hoá trạng thái chuẩn (Canonical projectStatus)
+- Booking API trả thêm projectStatus/projectStatusReason (mapping từ status cũ) để frontend hiển thị đúng flow marketplace.
+- Order API trả thêm projectStatus (mapping từ status cũ).
+
+3) Lịch sử trạng thái (History)
+- Order: đã có OrderProgress (giữ nguyên).
+- Booking: thêm BookingProgress để lưu lịch sử status; tự động ghi log các event chính (tạo yêu cầu, báo giá, xác nhận/từ chối, bắt đầu/hoàn tất, shop từ chối, dời lịch).
+- GET booking detail trả thêm history (ưu tiên dùng history thay vì suy luận từ timestamp).
+
+4) Compatibility (Backend)
+- Enforce part↔vehicle compatibility khi tạo/sửa Configuration:
+  - Nếu Part.compatibleCars có dữ liệu và không chứa carId của build → trả PART_NOT_COMPATIBLE (409).
+
+5) Frontend
+- BookingStatus ưu tiên dùng projectStatus + history nếu có (giữ tương thích khi field chưa có).
+- User Orders: hiển thị thêm trạng thái SHOP_REJECTED.
+- Seller Orders: thêm nút “Từ chối” cho Order ở trạng thái REQUESTED.
+
+6) i18n
+- Bổ sung key lỗi: QUOTE_REQUIRED, INVALID_QUOTED_PRICE, REASON_REQUIRED, PART_NOT_COMPATIBLE.

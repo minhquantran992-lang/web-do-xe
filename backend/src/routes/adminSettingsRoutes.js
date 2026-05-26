@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 
 const { adminRequired } = require('../middleware/auth');
+const { validateAvatarFile, moderateImageFile } = require('../security/uploadValidation');
 const {
   getHeroImagesAdmin,
   setHeroImagesAdmin,
@@ -63,13 +64,41 @@ const upload = multer({
   }
 });
 
+const validateHeroImageUploaded = async (req, res, next) => {
+  const file = req.file;
+  if (!file?.path) return next();
+  try {
+    const checked = await validateAvatarFile({ filePath: file.path, originalName: file.originalname, maxBytes: 10 * 1024 * 1024 });
+    if (!checked.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      const status = checked.error === 'FILE_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: checked.error });
+    }
+    const mod = await moderateImageFile({ filePath: file.path, originalName: file.originalname });
+    if (!mod.ok) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {}
+      return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
+    }
+    return next();
+  } catch (e) {
+    try {
+      await fs.promises.unlink(file.path);
+    } catch {}
+    return next(e);
+  }
+};
+
 router.get('/hero-images', adminRequired, getHeroImagesAdmin);
 router.put('/hero-images', adminRequired, setHeroImagesAdmin);
 router.get('/landing-hero-images', adminRequired, getLandingHeroImagesAdmin);
 router.put('/landing-hero-images', adminRequired, setLandingHeroImagesAdmin);
 router.get('/dashboard-hero-images', adminRequired, getDashboardHeroImagesAdmin);
 router.put('/dashboard-hero-images', adminRequired, setDashboardHeroImagesAdmin);
-router.post('/upload-hero-image', adminRequired, upload.single('file'), uploadHeroImageAdmin);
+router.post('/upload-hero-image', adminRequired, upload.single('file'), validateHeroImageUploaded, uploadHeroImageAdmin);
 
 module.exports = router;
 

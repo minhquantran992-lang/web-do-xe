@@ -7,6 +7,9 @@ const partSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        'chassis',
+        'frontWheel',
+        'rearWheel',
         'exhaust',
         'clutch',
         'wheels',
@@ -17,6 +20,8 @@ const partSchema = new mongoose.Schema(
         'bodykit',
         'seat',
         'lighting',
+        'tank',
+        'headlight',
         'throttle_housing',
         'topbox'
       ],
@@ -28,6 +33,8 @@ const partSchema = new mongoose.Schema(
     modelUrl: { type: String, default: '' },
     mountPoint: { type: String, default: '' },
     mountPoints: { type: [String], default: [] },
+    anchorType: { type: String, default: '' },
+    compatibleCars: { type: [mongoose.Schema.Types.ObjectId], default: [] },
     boundingBox: {
       x: { type: Number, default: 0 },
       y: { type: Number, default: 0 },

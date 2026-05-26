@@ -3,6 +3,7 @@ const fs = require('fs');
 const multer = require('multer');
 
 const { requireVendorApproved } = require('../middleware/auth');
+const { moderateImageFile } = require('../security/uploadValidation');
 const { ensureTicketUploadDir, listVendorTickets, getVendorTicket, respondVendorTicket } = require('../controllers/ticketsController');
 
 const router = express.Router();
@@ -44,8 +45,35 @@ const upload = multer({
   }
 });
 
+const moderateUploadedImages = async (req, res, next) => {
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (!files.length) return next();
+  try {
+    for (const f of files) {
+      const p = String(f?.path || '').trim();
+      if (!p) continue;
+      const m = String(f?.mimetype || '').toLowerCase();
+      if (!m.startsWith('image/')) continue;
+      const mod = await moderateImageFile({ filePath: p, originalName: f?.originalname });
+      if (!mod.ok) {
+        for (const x of files) {
+          const xp = String(x?.path || '').trim();
+          if (!xp) continue;
+          try {
+            await fs.promises.unlink(xp);
+          } catch {}
+        }
+        return res.status(400).json({ error: mod.error || 'SENSITIVE_IMAGE' });
+      }
+    }
+    return next();
+  } catch (e) {
+    return next(e);
+  }
+};
+
 router.get('/', requireVendorApproved, listVendorTickets);
 router.get('/:id', requireVendorApproved, getVendorTicket);
-router.post('/:id/respond', requireVendorApproved, upload.array('files', 8), respondVendorTicket);
+router.post('/:id/respond', requireVendorApproved, upload.array('files', 8), moderateUploadedImages, respondVendorTicket);
 
 module.exports = router;

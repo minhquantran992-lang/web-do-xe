@@ -4,6 +4,8 @@ import { getBrands, getCars } from '../services/api/cars.js';
 import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
 
+const IMG_FALLBACK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
 const resolveAssetUrl = (url) => {
   const base = getApiBaseUrl();
   const u = String(url || '').trim();
@@ -256,7 +258,7 @@ const Custom = () => {
             ) : null}
           </div>
 
-          {error ? <div className="mt-4 rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">{error}</div> : null}
+          {error ? <div className="mt-4 rounded-2xl border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">{t(error)}</div> : null}
 
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             <StepPill active={step === 1} title={t('custom_step_1')} desc={t('custom_step_1_desc')} />
@@ -351,6 +353,10 @@ const Custom = () => {
                         <img
                           alt={c.name || 'Model'}
                           src={resolveAssetUrl(c.image)}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = IMG_FALLBACK;
+                          }}
                           className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
                         />
                       ) : (
@@ -399,7 +405,15 @@ const Custom = () => {
               <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/40">
                 <div className="aspect-[16/10] w-full bg-zinc-900">
                   {selectedCar?.image ? (
-                    <img alt={selectedCar.name || 'Preview'} src={resolveAssetUrl(selectedCar.image)} className="h-full w-full object-cover" />
+                    <img
+                      alt={selectedCar.name || 'Preview'}
+                      src={resolveAssetUrl(selectedCar.image)}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.src = IMG_FALLBACK;
+                      }}
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="h-full w-full bg-zinc-900" />
                   )}

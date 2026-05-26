@@ -5,6 +5,9 @@ import { useI18n } from '../services/i18n.jsx';
 import { listPartneredShops } from '../services/api/vendors.js';
 import ChatThreadModal from '../components/ChatThreadModal.jsx';
 import { useAuth } from '../services/auth/AuthContext.jsx';
+import { isInappropriateText, validateEmail, validateHumanName, validateVietnamPhone } from '../services/validation.js';
+
+const cx = (...arr) => arr.filter(Boolean).join(' ');
 
 const resolveAssetUrl = (url) => {
   const base = getApiBaseUrl();
@@ -100,13 +103,15 @@ const Marketplace = () => {
   const [checkoutItems, setCheckoutItems] = useState([]);
   const [cart, setCart] = useState([]);
   const [buyQty, setBuyQty] = useState(1);
-  const [kyc, setKyc] = useState({ name: '', phone: '', address: '', note: '' });
+  const [kyc, setKyc] = useState({ name: '', phone: '', email: '', address: '', note: '' });
+  const [kycErrors, setKycErrors] = useState({});
   const [buyBusy, setBuyBusy] = useState(false);
   const [buyError, setBuyError] = useState('');
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [complaintBusy, setComplaintBusy] = useState(false);
   const [complaintError, setComplaintError] = useState('');
   const [complaintForm, setComplaintForm] = useState({ bookingId: '', issueType: 'wrong_part', description: '', files: [] });
+  const [complaintBookings, setComplaintBookings] = useState({ loading: false, items: [], error: '' });
 
   const vendorId = useMemo(() => {
     const fromPath = String(params?.vendorId || '').trim();
@@ -290,6 +295,11 @@ const Marketplace = () => {
     } catch {}
   }, [cart, cartKey]);
 
+  const cartCount = useMemo(
+    () => (Array.isArray(cart) ? cart : []).reduce((s, x) => s + Math.max(1, Math.floor(Number(x?.qty) || 1)), 0),
+    [cart]
+  );
+
   useEffect(() => {
     if (!buyOpen) return;
     const onKey = (e) => {
@@ -301,6 +311,30 @@ const Marketplace = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [buyBusy, buyOpen]);
+
+  useEffect(() => {
+    if (!complaintOpen) return;
+    if (!token || !vendorId) {
+      setComplaintBookings({ loading: false, items: [], error: '' });
+      return;
+    }
+    let alive = true;
+    setComplaintBookings((p) => ({ ...p, loading: true, error: '' }));
+    apiFetch('/api/bookings/my?status=completed', { token })
+      .then((data) => {
+        if (!alive) return;
+        const list = Array.isArray(data?.items) ? data.items : [];
+        const filtered = list.filter((b) => String(b?.shop?._id || '') === String(vendorId));
+        setComplaintBookings({ loading: false, items: filtered, error: '' });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setComplaintBookings({ loading: false, items: [], error: String(e?.message || '') });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [complaintOpen, token, vendorId]);
 
   const submitComplaint = async () => {
     if (!token || complaintBusy) return;
@@ -336,7 +370,7 @@ const Marketplace = () => {
       const bookingStatus = String(booking?.status || '').trim().toLowerCase();
       const bookingShopId = String(booking?.shop?._id || '').trim();
       if (!booking || !bookingShopId) {
-        setComplaintError('Không tìm thấy booking này trong tài khoản của bạn.');
+        setComplaintError('Không tìm thấy booking này (có thể bạn đăng nhập nhầm tài khoản hoặc nhập nhầm mã).');
         return;
       }
       if (bookingShopId !== String(vendorId)) {
@@ -345,6 +379,10 @@ const Marketplace = () => {
       }
       if (bookingStatus !== 'completed') {
         setComplaintError('Chỉ có thể gửi khiếu nại khi booking đã hoàn thành.');
+        return;
+      }
+      if (booking?.handoverAcceptedAt) {
+        setComplaintError('Booking đã xác nhận bàn giao nên không thể gửi khiếu nại.');
         return;
       }
 
@@ -364,7 +402,10 @@ const Marketplace = () => {
     } catch (e) {
       const code = String(e?.message || '').trim();
       if (code === 'UNAUTHORIZED') setComplaintError('Vui lòng đăng nhập để gửi khiếu nại.');
+      else if (code === 'INVALID_ID' || code === 'INVALID_BOOKING') setComplaintError('Mã booking không hợp lệ.');
+      else if (code === 'BOOKING_NOT_FOUND') setComplaintError('Không tìm thấy booking này (có thể bạn đăng nhập nhầm tài khoản).');
       else if (code === 'BOOKING_NOT_COMPLETED') setComplaintError('Booking chưa ở trạng thái hoàn thành.');
+      else if (code === 'BOOKING_FINALIZED') setComplaintError('Booking đã xác nhận bàn giao nên không thể gửi khiếu nại.');
       else if (code === 'EVIDENCE_REQUIRED') setComplaintError('Thiếu bằng chứng. Vui lòng tải ít nhất 1 ảnh/video.');
       else if (code === 'TICKET_ALREADY_ACTIVE') setComplaintError('Booking này đang có khiếu nại đang xử lý.');
       else if (code === 'NOT_FOUND') setComplaintError('Không tìm thấy booking này trong tài khoản của bạn.');
@@ -428,9 +469,11 @@ const Marketplace = () => {
     setKyc((p) => ({
       name: String(p?.name || user?.name || '').trim(),
       phone: String(p?.phone || user?.phone || '').trim(),
+      email: String(p?.email || user?.email || '').trim(),
       address: String(p?.address || '').trim(),
       note: String(p?.note || '').trim()
     }));
+    setKycErrors({});
   };
 
   const goKyc = ({ items }) => {
@@ -443,9 +486,11 @@ const Marketplace = () => {
     setKyc((p) => ({
       name: String(p?.name || user?.name || '').trim(),
       phone: String(p?.phone || user?.phone || '').trim(),
+      email: String(p?.email || user?.email || '').trim(),
       address: String(p?.address || '').trim(),
       note: String(p?.note || '').trim()
     }));
+    setKycErrors({});
   };
 
   const submitBuy = async () => {
@@ -459,23 +504,28 @@ const Marketplace = () => {
     const list = Array.isArray(checkoutItems) ? checkoutItems : [];
     if (!list.length) return;
 
-    const name = String(kyc.name || '').trim();
-    const phone = String(kyc.phone || '').trim();
-    const address = String(kyc.address || '').trim();
-    const note = String(kyc.note || '').trim();
+    const checkedName = validateHumanName(kyc?.name);
+    const checkedPhone = validateVietnamPhone(kyc?.phone);
+    const checkedEmail = validateEmail(kyc?.email);
+    const address = String(kyc?.address || '').trim();
+    const note = String(kyc?.note || '').trim().slice(0, 500);
 
-    if (name.length < 2) {
-      setBuyError('Vui lòng nhập họ tên.');
+    const nextErrors = {};
+    if (!checkedName.ok) nextErrors.name = checkedName.error;
+    if (!checkedPhone.ok) nextErrors.phone = checkedPhone.error;
+    if (!checkedEmail.ok) nextErrors.email = checkedEmail.error;
+    if (address.length < 6) nextErrors.address = 'Vui lòng nhập địa chỉ nhận hàng.';
+    else if (isInappropriateText(address)) nextErrors.address = 'Địa chỉ không phù hợp.';
+
+    if (Object.keys(nextErrors).length) {
+      setKycErrors(nextErrors);
+      setBuyError('Vui lòng kiểm tra lại thông tin.');
       return;
     }
-    if (phone.replace(/\D/g, '').length < 9) {
-      setBuyError('Vui lòng nhập số điện thoại hợp lệ.');
-      return;
-    }
-    if (address.length < 6) {
-      setBuyError('Vui lòng nhập địa chỉ nhận hàng.');
-      return;
-    }
+
+    const name = checkedName.value;
+    const phone = checkedPhone.value;
+    const email = checkedEmail.value;
 
     if (!token || buyBusy) return;
     setBuyBusy(true);
@@ -495,6 +545,7 @@ const Marketplace = () => {
         '',
         `Họ tên: ${name}`,
         `SĐT: ${phone}`,
+        `Email: ${email}`,
         `Địa chỉ: ${address}`,
         note ? `Ghi chú: ${note}` : ''
       ]
@@ -568,12 +619,6 @@ const Marketplace = () => {
                 <h1 className="mt-1 text-2xl font-black tracking-tight text-zinc-50 sm:text-3xl">{t('market_heading')}</h1>
                 <div className="mt-2 max-w-2xl text-sm text-zinc-400">{t('market_desc')}</div>
               </div>
-              <Link
-                to="/custom"
-                className="inline-flex items-center justify-center rounded-2xl bg-sky-400 px-5 py-3 text-sm font-semibold text-zinc-950 hover:bg-sky-300"
-              >
-                {t('dash_create_new')}
-              </Link>
             </div>
           </div>
         )}
@@ -676,9 +721,34 @@ const Marketplace = () => {
                       <button
                         type="button"
                         onClick={openCart}
-                        className="rounded-2xl border border-sky-400/25 bg-sky-500/10 px-4 py-2 text-xs font-black text-sky-100 hover:bg-sky-500/15"
+                        aria-label="Giỏ hàng"
+                        className={cx(
+                          'relative grid h-9 w-11 place-items-center rounded-2xl border text-sky-100 transition',
+                          cartCount > 0
+                            ? 'border-sky-400/30 bg-sky-500/15 hover:bg-sky-500/20'
+                            : 'border-white/10 bg-white/5 hover:bg-white/10'
+                        )}
                       >
-                        Giỏ hàng ({(Array.isArray(cart) ? cart : []).reduce((s, x) => s + Math.max(1, Math.floor(Number(x?.qty) || 1)), 0)})
+                        <span className="sr-only">Giỏ hàng</span>
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-5 w-5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M6 6h15l-2 8H7L6 6Z" />
+                          <path d="M6 6 5 3H2" />
+                          <path d="M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" />
+                          <path d="M18 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" />
+                        </svg>
+                        {cartCount > 0 ? (
+                          <span className="absolute -right-1.5 -top-1.5 grid min-w-[18px] place-items-center rounded-full border border-zinc-950/60 bg-sky-400 px-1.5 py-0.5 text-[10px] font-black leading-none text-zinc-950">
+                            {cartCount > 99 ? '99+' : cartCount}
+                          </span>
+                        ) : null}
                       </button>
                       <select
                         value={sortKey}
@@ -964,14 +1034,29 @@ const Marketplace = () => {
                 state={{ vendor: it || null }}
                 className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/40 transition hover:border-sky-400/30"
               >
-                <div className="aspect-[16/10] w-full bg-zinc-900">
+                <div className="relative aspect-[16/10] w-full bg-zinc-900">
                   {it?.coverImage ? (
                     <img alt="" src={resolveAssetUrl(it.coverImage)} className="h-full w-full object-cover opacity-90" />
                   ) : (
                     <div className="h-full w-full bg-gradient-to-r from-zinc-900 via-zinc-900 to-sky-950/30" />
                   )}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/75 via-black/30 to-transparent" />
+                  <div className="absolute bottom-3 left-3">
+                    <div className="h-14 w-14 overflow-hidden rounded-2xl border border-white/15 bg-zinc-950 shadow-[0_12px_40px_rgba(0,0,0,0.65)]">
+                      {it?.logo ? (
+                        <img alt="" src={resolveAssetUrl(it.logo)} className="h-full w-full object-contain p-2" />
+                      ) : (
+                        <div className="grid h-full w-full place-items-center text-sm font-black text-zinc-200">
+                          {String(it?.shopName || 'S')
+                            .trim()
+                            .slice(0, 1)
+                            .toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-2 p-4">
+                <div className="space-y-2 p-4 pt-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-black text-zinc-100 group-hover:text-white">{it?.shopName || 'Shop'}</div>
@@ -1232,31 +1317,74 @@ const Marketplace = () => {
                         <div className="text-xs font-semibold text-zinc-400">Họ tên</div>
                         <input
                           value={kyc.name}
-                          onChange={(e) => setKyc((p) => ({ ...(p || {}), name: e.target.value }))}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setKyc((p) => ({ ...(p || {}), name: v }));
+                            setKycErrors((prev) => ({ ...(prev || {}), name: '' }));
+                          }}
                           disabled={buyBusy}
-                          className="w-full rounded-2xl border border-white/15 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                          className={cx(
+                            'w-full rounded-2xl border bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40',
+                            kycErrors?.name ? 'border-rose-400/40' : 'border-white/15'
+                          )}
                         />
+                        {kycErrors?.name ? <div className="text-xs font-semibold text-rose-200">{kycErrors.name}</div> : null}
                       </label>
                       <label className="block space-y-1">
                         <div className="text-xs font-semibold text-zinc-400">Số điện thoại</div>
                         <input
                           value={kyc.phone}
-                          onChange={(e) => setKyc((p) => ({ ...(p || {}), phone: e.target.value }))}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setKyc((p) => ({ ...(p || {}), phone: v }));
+                            setKycErrors((prev) => ({ ...(prev || {}), phone: '' }));
+                          }}
                           disabled={buyBusy}
-                          className="w-full rounded-2xl border border-white/15 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                          placeholder="VD: 09xxxxxxxx hoặc +849xxxxxxxx"
+                          className={cx(
+                            'w-full rounded-2xl border bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40',
+                            kycErrors?.phone ? 'border-rose-400/40' : 'border-white/15'
+                          )}
                         />
+                        {kycErrors?.phone ? <div className="text-xs font-semibold text-rose-200">{kycErrors.phone}</div> : null}
                       </label>
                     </div>
+                    <label className="block space-y-1">
+                      <div className="text-xs font-semibold text-zinc-400">Email</div>
+                      <input
+                        value={kyc.email}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setKyc((p) => ({ ...(p || {}), email: v }));
+                          setKycErrors((prev) => ({ ...(prev || {}), email: '' }));
+                        }}
+                        disabled={buyBusy}
+                        placeholder="email@domain.com"
+                        className={cx(
+                          'w-full rounded-2xl border bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40',
+                          kycErrors?.email ? 'border-rose-400/40' : 'border-white/15'
+                        )}
+                      />
+                      {kycErrors?.email ? <div className="text-xs font-semibold text-rose-200">{kycErrors.email}</div> : null}
+                    </label>
                     <label className="block space-y-1">
                       <div className="text-xs font-semibold text-zinc-400">Địa chỉ nhận hàng</div>
                       <textarea
                         value={kyc.address}
-                        onChange={(e) => setKyc((p) => ({ ...(p || {}), address: e.target.value }))}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setKyc((p) => ({ ...(p || {}), address: v }));
+                          setKycErrors((prev) => ({ ...(prev || {}), address: '' }));
+                        }}
                         rows={3}
                         disabled={buyBusy}
                         placeholder="Ví dụ: 123 Lê Lợi, P. Bến Thành, Q.1, TP.HCM"
-                        className="w-full resize-none rounded-2xl border border-white/15 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                        className={cx(
+                          'w-full resize-none rounded-2xl border bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40',
+                          kycErrors?.address ? 'border-rose-400/40' : 'border-white/15'
+                        )}
                       />
+                      {kycErrors?.address ? <div className="text-xs font-semibold text-rose-200">{kycErrors.address}</div> : null}
                     </label>
                     <label className="block space-y-1">
                       <div className="text-xs font-semibold text-zinc-400">Ghi chú (tuỳ chọn)</div>
@@ -1299,7 +1427,7 @@ const Marketplace = () => {
         <div className="fixed inset-0 z-[90]">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => (complaintBusy ? null : setComplaintOpen(false))} />
           <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[640px] -translate-x-1/2 -translate-y-1/2">
-            <div className="relative overflow-hidden rounded-3xl border border-white/15 bg-zinc-950/80 shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)] backdrop-blur-2xl">
+            <div className="relative flex max-h-[85vh] flex-col overflow-hidden rounded-3xl border border-white/15 bg-zinc-950/80 shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)] backdrop-blur-2xl">
               <div className="flex items-start justify-between gap-3 border-b border-white/10 px-6 py-5">
                 <div>
                   <div className="text-lg font-black text-zinc-50">Gửi khiếu nại</div>
@@ -1314,7 +1442,7 @@ const Marketplace = () => {
                   Đóng
                 </button>
               </div>
-              <div className="space-y-4 px-6 py-5">
+              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
                 {complaintError ? (
                   <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{complaintError}</div>
                 ) : null}
@@ -1329,6 +1457,38 @@ const Marketplace = () => {
                   />
                   <div className="text-[11px] text-zinc-500">Chỉ gửi được khi booking đã hoàn thành và thuộc shop này.</div>
                 </label>
+                {token && vendorId ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs font-semibold text-zinc-300">Chọn nhanh booking đã hoàn thành</div>
+                    {complaintBookings.loading ? <div className="mt-2 text-xs text-zinc-400">Đang tải booking…</div> : null}
+                    {!complaintBookings.loading && Array.isArray(complaintBookings.items) && complaintBookings.items.length ? (
+                      <div className="mt-2">
+                        <select
+                          value={parseBookingId(complaintForm.bookingId)}
+                          onChange={(e) => setComplaintForm((p) => ({ ...p, bookingId: String(e.target.value || '') }))}
+                          disabled={complaintBusy}
+                          style={{ colorScheme: 'dark' }}
+                          className="w-full rounded-2xl border border-white/15 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                        >
+                          <option value="">Chọn booking…</option>
+                          {complaintBookings.items.slice(0, 20).map((b, idx) => {
+                            const id = String(b?._id || '').trim();
+                            const title = String(b?.snapshot?.buildName || b?.snapshot?.carName || '').trim() || 'Booking';
+                            const when = fmtDate(b?.timeSlot || b?.createdAt);
+                            return (
+                              <option key={id || String(idx)} value={id}>
+                                {title} • {when || '—'} • {id ? id.slice(-10) : '—'}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <div className="mt-2 text-xs text-zinc-400">
+                          Nếu bạn không thấy booking ở đây, thường là booking chưa hoàn thành hoặc bạn đang đăng nhập nhầm tài khoản.
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <label className="block space-y-1">
                   <div className="text-xs font-semibold text-zinc-400">Loại vấn đề</div>
                   <select

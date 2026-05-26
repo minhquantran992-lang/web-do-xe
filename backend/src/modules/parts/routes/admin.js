@@ -2,19 +2,21 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { adminRequired } = require('../middleware/auth');
-const { validateModelFile } = require('../security/uploadValidation');
+
+const { adminRequired } = require('../../../middleware/auth');
+const { validateModelFile } = require('../../../security/uploadValidation');
 const {
   listPartsAdmin,
   createPartAdmin,
   updatePartAdmin,
   deletePartAdmin,
-  uploadModelPartAdmin
+  uploadModelPartAdmin,
+  bulkAssignCompatibleCars
 } = require('../controllers/adminPartsController');
 
 const router = express.Router();
 
-const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'models');
+const uploadDir = path.join(__dirname, '..', '..', '..', '..', 'uploads', 'models');
 fs.mkdirSync(uploadDir, { recursive: true });
 const maxMbRaw = Number(process.env.UPLOAD_MODEL_MAX_MB || 200);
 const maxBytes = Math.max(1, (Number.isFinite(maxMbRaw) ? maxMbRaw : 200)) * 1024 * 1024;
@@ -36,8 +38,7 @@ const storage = multer.diskStorage({
     const lower = original.toLowerCase();
 
     const ext = lower.endsWith('.gltf') ? '.gltf' : lower.endsWith('.glb') ? '.glb' : '';
-    const doubleExt =
-      lower.endsWith('.gltf.gltf') ? '.gltf.gltf' : lower.endsWith('.glb.glb') ? '.glb.glb' : '';
+    const doubleExt = lower.endsWith('.gltf.gltf') ? '.gltf.gltf' : lower.endsWith('.glb.glb') ? '.glb.glb' : '';
 
     const baseRaw = doubleExt ? original.slice(0, -doubleExt.length) : ext ? original.slice(0, -ext.length) : original;
     const base = sanitizeBaseName(baseRaw);
@@ -100,6 +101,7 @@ const validateModelUploaded = async (req, res, next) => {
 router.get('/', adminRequired, listPartsAdmin);
 router.post('/', adminRequired, createPartAdmin);
 router.put('/:id', adminRequired, updatePartAdmin);
+router.post('/bulk-assign-compat', adminRequired, bulkAssignCompatibleCars);
 router.post('/upload-model', adminRequired, uploadOneModel, validateModelUploaded, uploadModelPartAdmin);
 router.delete('/:id', adminRequired, deletePartAdmin);
 

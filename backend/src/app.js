@@ -13,14 +13,11 @@ const { rateLimit } = require('./middleware/rateLimit');
 const { botDetection } = require('./middleware/botDetection');
 
 const authRoutes = require('./routes/authRoutes');
-const carsRoutes = require('./routes/carsRoutes');
-const partsRoutes = require('./routes/partsRoutes');
 const brandsRoutes = require('./routes/brandsRoutes');
 const backgroundsRoutes = require('./routes/backgroundsRoutes');
 const configurationRoutes = require('./routes/configurationRoutes');
 const buildRoutes = require('./routes/buildRoutes');
 const adminCarsRoutes = require('./routes/adminCarsRoutes');
-const adminPartsRoutes = require('./routes/adminPartsRoutes');
 const adminBrandsRoutes = require('./routes/adminBrandsRoutes');
 const adminBackgroundsRoutes = require('./routes/adminBackgroundsRoutes');
 const adminVendorsRoutes = require('./routes/adminVendorsRoutes');
@@ -48,6 +45,9 @@ const notificationsRoutes = require('./routes/notificationsRoutes');
 const ordersRoutes = require('./routes/ordersRoutes');
 const vendorOrdersRoutes = require('./routes/vendorOrdersRoutes');
 const adminSecurityRoutes = require('./routes/adminSecurityRoutes');
+
+const partsModule = require('./modules/parts');
+const vehiclesModule = require('./modules/vehicles');
 
 const createServer = () => {
   const app = express();
@@ -115,10 +115,10 @@ const createServer = () => {
 
   app.use('/auth', authRoutes);
   app.use('/api/auth', authRoutes);
-  app.use('/api/cars', carsRoutes);
+  app.use('/api/cars', vehiclesModule.publicRouter);
   app.use('/api/backgrounds', backgroundsRoutes);
   app.use('/api/admin/cars', adminCarsRoutes);
-  app.use('/api/admin/parts', adminPartsRoutes);
+  app.use('/api/admin/parts', partsModule.adminRouter);
   app.use('/api/admin/brands', adminBrandsRoutes);
   app.use('/api/admin/backgrounds', adminBackgroundsRoutes);
   app.use('/api/admin/vendors', adminVendorsRoutes);
@@ -143,7 +143,8 @@ const createServer = () => {
   app.use('/api/settings', settingsRoutes);
   app.use('/api/search', searchRoutes);
   app.use('/api/ai', aiRoutes);
-  app.use('/parts', partsRoutes);
+  app.use('/parts', partsModule.publicRouter);
+  app.use('/api/parts', partsModule.publicRouter);
   app.use('/brands', brandsRoutes);
   app.use('/configurations', configurationRoutes);
   app.use(buildRoutes);

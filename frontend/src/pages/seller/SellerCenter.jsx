@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { apiFetch, apiFetchForm, getApiBaseUrl } from '../../services/api/client.js';
 import { useAuth } from '../../services/auth/AuthContext.jsx';
 import { useI18n } from '../../services/i18n.jsx';
+import { humanizeImageUploadError } from '../../services/validation.js';
 import Header from './Header.jsx';
 import Sidebar from './Sidebar.jsx';
 import Dashboard from './Dashboard.jsx';
@@ -298,7 +299,7 @@ const ShopProducts = () => {
                       const url = await uploadImage(file);
                       setForm((p) => ({ ...p, coverImage: url }));
                     } catch (err) {
-                      setError(err?.message || 'UPLOAD_FAILED');
+                      setError(humanizeImageUploadError(err));
                     } finally {
                       e.target.value = '';
                     }
@@ -306,6 +307,7 @@ const ShopProducts = () => {
                   className="block w-[190px] text-xs text-zinc-300 file:mr-3 file:rounded-xl file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:font-bold file:text-zinc-100 hover:file:bg-white/15"
                 />
               </label>
+              <div className="text-[11px] font-semibold text-zinc-400">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
             </div>
 
             {form.coverImage ? (
@@ -483,7 +485,7 @@ const ShopProducts = () => {
                     const url = await uploadImage(file);
                     setEditForm((p) => ({ ...p, coverImage: url }));
                   } catch (err) {
-                    setError(err?.message || 'UPLOAD_FAILED');
+                    setError(humanizeImageUploadError(err));
                   } finally {
                     e.target.value = '';
                   }
@@ -491,6 +493,7 @@ const ShopProducts = () => {
                 className="block w-[190px] text-xs text-zinc-300 file:mr-3 file:rounded-xl file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:font-bold file:text-zinc-100 hover:file:bg-white/15"
               />
             </label>
+            <div className="text-[11px] font-semibold text-zinc-400">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
           </div>
 
           {editForm.coverImage ? (
@@ -510,9 +513,28 @@ const ShopContent = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [form, setForm] = useState({ title: '', content: '', mediaUrl: '', thumbnailUrl: '' });
+
+  const uploadPostMedia = async (file) => {
+    if (!token || !file) return '';
+    const base = getApiBaseUrl();
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${base}/api/vendor/posts/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = data?.error || 'UPLOAD_FAILED';
+      throw new Error(msg);
+    }
+    return String(data?.url || '').trim();
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -642,29 +664,86 @@ const ShopContent = () => {
                 value={form.mediaUrl}
                 onChange={(e) => setForm((p) => ({ ...p, mediaUrl: e.target.value }))}
                 placeholder={type === 'video' ? 'https://… hoặc /uploads/…' : 'https://… hoặc /uploads/…'}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
+                disabled={saving || uploading}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40 disabled:opacity-60"
               />
             </label>
 
+            <label className="inline-flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+              <div className="text-xs font-semibold text-zinc-300">{type === 'video' ? 'Upload video' : 'Upload ảnh minh hoạ'}</div>
+              <input
+                type="file"
+                accept={type === 'video' ? 'video/mp4,video/webm,video/quicktime,video/x-m4v' : 'image/png,image/jpeg,image/webp,image/gif'}
+                disabled={saving || uploading}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setError('');
+                  setUploading(true);
+                  try {
+                    const url = await uploadPostMedia(file);
+                    setForm((p) => ({ ...p, mediaUrl: url }));
+                  } catch (err) {
+                    setError(humanizeImageUploadError(err));
+                  } finally {
+                    setUploading(false);
+                    e.target.value = '';
+                  }
+                }}
+                className="block w-[210px] text-xs text-zinc-300 file:mr-3 file:rounded-xl file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:font-bold file:text-zinc-100 hover:file:bg-white/15 disabled:opacity-60"
+              />
+            </label>
+            {type !== 'video' ? (
+              <div className="text-[11px] font-semibold text-zinc-400">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
+            ) : null}
+
             {type === 'video' ? (
-              <label className="space-y-1">
-                <div className="text-xs font-semibold text-zinc-400">Thumbnail (tuỳ chọn)</div>
-                <input
-                  value={form.thumbnailUrl}
-                  onChange={(e) => setForm((p) => ({ ...p, thumbnailUrl: e.target.value }))}
-                  placeholder="https://… hoặc /uploads/…"
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40"
-                />
-              </label>
+              <>
+                <label className="space-y-1">
+                  <div className="text-xs font-semibold text-zinc-400">Thumbnail (tuỳ chọn)</div>
+                  <input
+                    value={form.thumbnailUrl}
+                    onChange={(e) => setForm((p) => ({ ...p, thumbnailUrl: e.target.value }))}
+                    placeholder="https://… hoặc /uploads/…"
+                    disabled={saving || uploading}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-sky-400/40 disabled:opacity-60"
+                  />
+                </label>
+                <label className="inline-flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                  <div className="text-xs font-semibold text-zinc-300">Upload thumbnail</div>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    disabled={saving || uploading}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setError('');
+                      setUploading(true);
+                      try {
+                        const url = await uploadPostMedia(file);
+                        setForm((p) => ({ ...p, thumbnailUrl: url }));
+                      } catch (err) {
+                        setError(humanizeImageUploadError(err));
+                      } finally {
+                        setUploading(false);
+                        e.target.value = '';
+                      }
+                    }}
+                    className="block w-[210px] text-xs text-zinc-300 file:mr-3 file:rounded-xl file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:font-bold file:text-zinc-100 hover:file:bg-white/15 disabled:opacity-60"
+                  />
+                </label>
+                <div className="text-[11px] font-semibold text-zinc-400">Ảnh sẽ được kiểm duyệt. Ảnh nhạy cảm sẽ bị từ chối.</div>
+              </>
             ) : null}
 
             <button
               type="button"
-              disabled={saving || !canCreate}
+              disabled={saving || uploading || !canCreate}
               onClick={create}
               className="w-full rounded-2xl bg-gradient-to-r from-sky-400 to-cyan-300 px-4 py-2.5 text-sm font-black text-zinc-950 hover:brightness-110 disabled:opacity-60"
             >
-              {saving ? 'Đang đăng…' : type === 'video' ? 'Đăng video' : 'Đăng bài'}
+              {uploading ? 'Đang upload…' : saving ? 'Đang đăng…' : type === 'video' ? 'Đăng video' : 'Đăng bài'}
             </button>
           </div>
         </div>

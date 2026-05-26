@@ -28,6 +28,15 @@ const SLOT_RULES = {
 
 const normalizeSlot = (raw) => String(raw || '').trim().toLowerCase();
 
+const isPartCompatibleWithCar = ({ part, carId }) => {
+  const cid = String(carId || '').trim();
+  if (!cid || !mongoose.isValidObjectId(cid)) return true;
+  const list = Array.isArray(part?.compatibleCars) ? part.compatibleCars : [];
+  if (!list.length) return true;
+  const set = new Set(list.map((x) => String(x || '')).filter(Boolean));
+  return set.has(cid);
+};
+
 const validateSlot = (slot) => {
   if (!slot) return { ok: false, error: 'MISSING_SLOT' };
   if (!/^[a-z0-9_]+$/.test(slot)) return { ok: false, error: 'INVALID_SLOT' };
@@ -129,14 +138,19 @@ const createConfiguration = asyncHandler(async (req, res) => {
 
   if (partIds.length) {
     const rows = await Part.find({ _id: { $in: partIds } })
-      .select('_id type')
+      .select('_id type compatibleCars')
       .lean();
     const byId = new Map(rows.map((r) => [String(r._id), r]));
     if (rows.length !== new Set(partIds).size) return res.status(400).json({ error: 'INVALID_PARTS' });
 
     const parts = {};
     const wheelsId = selectedWheels && mongoose.isValidObjectId(String(selectedWheels)) ? String(selectedWheels) : '';
-    if (wheelsId) parts.wheels = wheelsId;
+    if (wheelsId) {
+      const p = byId.get(wheelsId);
+      if (!p) return res.status(400).json({ error: 'INVALID_PARTS' });
+      if (!isPartCompatibleWithCar({ part: p, carId })) return res.status(409).json({ error: 'PART_NOT_COMPATIBLE' });
+      parts.wheels = wheelsId;
+    }
 
     if (Array.isArray(selectedParts)) {
       for (const rawId of selectedParts) {
@@ -144,6 +158,7 @@ const createConfiguration = asyncHandler(async (req, res) => {
         if (!mongoose.isValidObjectId(id)) continue;
         const p = byId.get(id);
         if (!p) continue;
+        if (!isPartCompatibleWithCar({ part: p, carId })) return res.status(409).json({ error: 'PART_NOT_COMPATIBLE' });
         const slot = normalizeSlot(p.type);
         if (!SLOT_RULES[slot]) continue;
         if (slot === 'wheels') continue;
@@ -192,8 +207,13 @@ const updateConfigurationPart = asyncHandler(async (req, res) => {
 
   if (partId !== null) {
     if (!mongoose.isValidObjectId(partId)) return res.status(400).json({ error: 'INVALID_PART' });
-    const part = await Part.findById(partId).select('_id type').lean();
+    const [baseCfg, part] = await Promise.all([
+      Configuration.findOne({ _id: configId, userId }).select('_id carId').lean(),
+      Part.findById(partId).select('_id type compatibleCars').lean()
+    ]);
+    if (!baseCfg) return res.status(404).json({ error: 'CONFIG_NOT_FOUND' });
     if (!part) return res.status(404).json({ error: 'PART_NOT_FOUND' });
+    if (!isPartCompatibleWithCar({ part, carId: baseCfg?.carId })) return res.status(409).json({ error: 'PART_NOT_COMPATIBLE' });
     if (!slot) slot = normalizeSlot(part.type);
     const slotCheck = validateSlot(slot);
     if (!slotCheck.ok) return res.status(400).json({ error: slotCheck.error });

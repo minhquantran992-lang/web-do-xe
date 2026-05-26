@@ -48,6 +48,10 @@ export const quoteVendorOrder = async ({ token, id, quotedPrice, note }) => {
   return apiFetch(`/api/vendor/orders/${encodeURIComponent(String(id))}/quote`, { token, method: 'POST', body: { quotedPrice, note } });
 };
 
+export const rejectVendorOrder = async ({ token, id, reason }) => {
+  return apiFetch(`/api/vendor/orders/${encodeURIComponent(String(id))}/reject`, { token, method: 'POST', body: { reason } });
+};
+
 export const startVendorOrder = async ({ token, id, note, imageUrl }) => {
   return apiFetch(`/api/vendor/orders/${encodeURIComponent(String(id))}/start`, { token, method: 'POST', body: { note, imageUrl } });
 };

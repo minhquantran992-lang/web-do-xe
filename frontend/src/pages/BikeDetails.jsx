@@ -1,8 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getCars } from '../services/api/cars.js';
+import { getApiBaseUrl } from '../services/api/client.js';
 import { useI18n } from '../services/i18n.jsx';
 import { useAuth } from '../services/auth/AuthContext.jsx';
+
+const IMG_FALLBACK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+const resolveAssetUrl = (url) => {
+  const base = getApiBaseUrl();
+  const u = String(url || '').trim();
+  if (!u) return '';
+  if (u.startsWith('data:') || u.startsWith('blob:')) return u;
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  if (u.startsWith('/')) return `${base}${u}`;
+  return `${base}/${u}`;
+};
 
 const formatCc = (cc) => {
   const n = Number(cc);
@@ -55,7 +68,7 @@ const BikeDetails = () => {
     return (
       <div className="space-y-3">
         <div className="text-red-400">
-          {t('common_error')}: {error}
+          {t('common_error')}: {t(error)}
         </div>
         <Link to="/bikes" className="text-sky-300 hover:text-sky-200">
           {t('bike_details_back')}
@@ -110,7 +123,17 @@ const BikeDetails = () => {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/30">
           <div className="aspect-[16/10] w-full bg-zinc-900">
-            {bike.image ? <img src={bike.image} alt="" className="h-full w-full object-cover" /> : null}
+            {bike.image ? (
+              <img
+                src={resolveAssetUrl(bike.image)}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.src = IMG_FALLBACK;
+                }}
+                className="h-full w-full object-cover"
+              />
+            ) : null}
           </div>
         </div>
 
